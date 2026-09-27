@@ -815,6 +815,42 @@ data class RideDetail(
     val parsedRecord: RideRecord? = null,
 )
 
+/**
+ * Decides which engine command is the next useful action.
+ *
+ * Real vehicle telemetry: a **locked** Ninebot e-bike can still report
+ * `pwr=1` (ECU awake / BLE connected). Driving the button from `pwr` alone
+ * then shows 「熄火」 on a parked locked vehicle, which is wrong.
+ *
+ * Order:
+ * 1. lock state (what the user sees on the bike)
+ * 2. power state (fallback when lock is unknown)
+ * 3. unknown → no dangerous command
+ */
+object PowerActionDecision {
+    enum class Choice { ENGINE_START, ENGINE_STOP, NONE }
+
+    fun decide(isLocked: Boolean?, isPoweredOn: Boolean?): Choice = when {
+        isLocked == true -> Choice.ENGINE_START
+        isLocked == false -> Choice.ENGINE_STOP
+        isPoweredOn == true -> Choice.ENGINE_STOP
+        isPoweredOn == false -> Choice.ENGINE_START
+        else -> Choice.NONE
+    }
+
+    fun label(choice: Choice): String = when (choice) {
+        Choice.ENGINE_START -> "上电"
+        Choice.ENGINE_STOP -> "熄火"
+        Choice.NONE -> "电源未知"
+    }
+
+    fun action(choice: Choice): VehicleAction? = when (choice) {
+        Choice.ENGINE_START -> VehicleAction.ENGINE_START
+        Choice.ENGINE_STOP -> VehicleAction.ENGINE_STOP
+        Choice.NONE -> null
+    }
+}
+
 data class VehicleAction(
     val id: String,
     val title: String,

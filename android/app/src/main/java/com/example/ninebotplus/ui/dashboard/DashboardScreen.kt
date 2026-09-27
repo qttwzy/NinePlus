@@ -415,17 +415,16 @@ private fun ActionPanel(
         ) {
             ActionButton("寻车", enabled = !isLoading) { onAction(VehicleAction.BELL) }
             ActionButton("座桶", enabled = !isLoading) { onAction(VehicleAction.OPEN_BUCKET) }
-            // Engine start/stop is a POWER action (`pwr`), not a lock action.
-            // Tri-state: true→熄火, false→上电, null→disabled (unknown).
-            val powerState = snapshot.state.isPoweredOn
-            when (powerState) {
-                true -> ActionButton("熄火", enabled = !isLoading, emphasized = true) {
-                    onAction(VehicleAction.ENGINE_STOP)
-                }
-                false -> ActionButton("上电", enabled = !isLoading, emphasized = true) {
-                    onAction(VehicleAction.ENGINE_START)
-                }
-                null -> ActionButton("电源未知", enabled = false, emphasized = true) { }
+            // Locked bikes often report pwr=1 (ECU awake). Pick the next useful
+            // command from lock state first — locked ⇒ 上电, unlocked ⇒ 熄火.
+            val choice = com.example.ninebotplus.domain.PowerActionDecision.decide(
+                isLocked = snapshot.state.isLocked,
+                isPoweredOn = snapshot.state.isPoweredOn,
+            )
+            val label = com.example.ninebotplus.domain.PowerActionDecision.label(choice)
+            val action = com.example.ninebotplus.domain.PowerActionDecision.action(choice)
+            ActionButton(label, enabled = !isLoading && action != null, emphasized = true) {
+                action?.let(onAction)
             }
         }
     }

@@ -3,6 +3,8 @@ package com.example.ninebotplus
 import com.example.ninebotplus.data.AuthAssembler
 import com.example.ninebotplus.data.SettingsStore
 import com.example.ninebotplus.domain.LoginResult
+import com.example.ninebotplus.domain.PowerActionDecision
+import com.example.ninebotplus.domain.PowerActionDecision.Choice
 import com.example.ninebotplus.domain.ServerConfiguration
 import com.example.ninebotplus.location.ActiveRideStore
 import com.example.ninebotplus.location.RideMath
@@ -145,19 +147,29 @@ class LifecycleRegressionTest {
         // The test proves double-transform would differ — ownership must be one place.
     }
 
-    // --- Power tri-state ---
+    // --- Power / lock action decision ---
 
     @Test
-    fun `power tri-state decision`() {
-        // Mirrors DashboardScreen ActionPanel logic.
-        fun decision(isPoweredOn: Boolean?): String = when (isPoweredOn) {
-            true -> "ENGINE_STOP"
-            false -> "ENGINE_START"
-            null -> "DISABLED"
-        }
-        assertThat(decision(true)).isEqualTo("ENGINE_STOP")
-        assertThat(decision(false)).isEqualTo("ENGINE_START")
-        assertThat(decision(null)).isEqualTo("DISABLED")
+    fun `power action decision`() {
+        // Real telemetry: locked bike still has pwr=1 → must be 上电, not 熄火.
+        assertThat(PowerActionDecision.decide(true, true)).isEqualTo(Choice.ENGINE_START)
+        assertThat(PowerActionDecision.decide(true, false)).isEqualTo(Choice.ENGINE_START)
+        assertThat(PowerActionDecision.decide(true, null)).isEqualTo(Choice.ENGINE_START)
+
+        // Unlocked → power off
+        assertThat(PowerActionDecision.decide(false, true)).isEqualTo(Choice.ENGINE_STOP)
+        assertThat(PowerActionDecision.decide(false, false)).isEqualTo(Choice.ENGINE_STOP)
+
+        // Lock unknown → fall back to power
+        assertThat(PowerActionDecision.decide(null, true)).isEqualTo(Choice.ENGINE_STOP)
+        assertThat(PowerActionDecision.decide(null, false)).isEqualTo(Choice.ENGINE_START)
+
+        // Both unknown → no dangerous command
+        assertThat(PowerActionDecision.decide(null, null)).isEqualTo(Choice.NONE)
+
+        assertThat(PowerActionDecision.label(Choice.ENGINE_START)).isEqualTo("上电")
+        assertThat(PowerActionDecision.label(Choice.ENGINE_STOP)).isEqualTo("熄火")
+        assertThat(PowerActionDecision.action(Choice.NONE)).isNull()
     }
 
     // --- Incremental distance ---
