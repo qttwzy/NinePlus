@@ -156,8 +156,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     if (granted) {
                         viewModel.enablePush()
                     } else {
-                        viewModel.clearMessages()
-                        // Surface a real denied state instead of pretending we asked.
+                        viewModel.setNotificationPermissionDenied()
                     }
                 }
                 OutlinedButton(

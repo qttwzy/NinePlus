@@ -69,9 +69,7 @@ class PushManager(
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .build()
-        runCatching {
-            NotificationManagerCompat.from(context).notify(CHARGING_NOTIFICATION_ID, notification)
-        }
+        notifySafely(CHARGING_NOTIFICATION_ID, notification)
     }
 
     fun cancelChargingNotification() {
@@ -104,11 +102,25 @@ class PushManager(
             .setContentIntent(pending)
             .setAutoCancel(true)
             .build()
+        notifySafely((System.currentTimeMillis() % 10_000).toInt(), notification)
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun notifySafely(id: Int, notification: android.app.Notification) {
+        if (!canPostNotifications()) return
         runCatching {
-            NotificationManagerCompat.from(context).notify(
-                (System.currentTimeMillis() % 10_000).toInt(),
-                notification,
-            )
+            NotificationManagerCompat.from(context).notify(id, notification)
+        }
+    }
+
+    private fun canPostNotifications(): Boolean {
+        return if (android.os.Build.VERSION.SDK_INT >= 33) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
         }
     }
 

@@ -95,10 +95,6 @@
         </receiver>
 
         <receiver
-            android:name=".push.ChargingNotificationReceiver"
-            android:exported="false" />
-
-        <receiver
             android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver"
             android:enabled="false"
             android:exported="false" />

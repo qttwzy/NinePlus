@@ -415,12 +415,17 @@ private fun ActionPanel(
         ) {
             ActionButton("寻车", enabled = !isLoading) { onAction(VehicleAction.BELL) }
             ActionButton("座桶", enabled = !isLoading) { onAction(VehicleAction.OPEN_BUCKET) }
-            // Engine start/stop is a POWER action, not a lock action.
-            // Platform endpoint is /engine/start|stop and maps to `pwr`.
-            // Do NOT drive it from isLocked / lock_status.
-            val poweredOn = snapshot.state.isPoweredOn == true
-            ActionButton(if (poweredOn) "熄火" else "上电", enabled = !isLoading, emphasized = true) {
-                onAction(if (poweredOn) VehicleAction.ENGINE_STOP else VehicleAction.ENGINE_START)
+            // Engine start/stop is a POWER action (`pwr`), not a lock action.
+            // Tri-state: true→熄火, false→上电, null→disabled (unknown).
+            val powerState = snapshot.state.isPoweredOn
+            when (powerState) {
+                true -> ActionButton("熄火", enabled = !isLoading, emphasized = true) {
+                    onAction(VehicleAction.ENGINE_STOP)
+                }
+                false -> ActionButton("上电", enabled = !isLoading, emphasized = true) {
+                    onAction(VehicleAction.ENGINE_START)
+                }
+                null -> ActionButton("电源未知", enabled = false, emphasized = true) { }
             }
         }
     }
