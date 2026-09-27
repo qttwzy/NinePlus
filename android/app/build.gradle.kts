@@ -36,6 +36,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
+            // Cleartext to LAN allowed via src/debug/res/xml/network_security_config.xml
         }
         release {
             isMinifyEnabled = true
@@ -44,8 +45,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Never fall back to debug signing for a release artifact.
+            // Without NINEPLUS_KEYSTORE_PATH the APK is unsigned and must be
+            // signed separately (apksigner) before distribution.
             signingConfig = signingConfigs.findByName("release")?.takeIf { it.storeFile != null }
-                ?: signingConfigs.getByName("debug")
         }
     }
 

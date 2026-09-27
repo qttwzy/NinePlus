@@ -160,7 +160,9 @@ abstract class NinePlusDatabase : RoomDatabase() {
                     context.applicationContext,
                     NinePlusDatabase::class.java,
                     "nineplus.db",
-                ).fallbackToDestructiveMigration()
+                )
+                    // NEVER wipe user ride history on a schema bump. Migrations
+                    // must be added explicitly when version increases.
                     .build()
                     .also { instance = it }
             }
