@@ -28,9 +28,16 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
  */
 class SettingsStore(
     private val context: Context,
-    private val credentials: CredentialStore = CredentialStore(context),
+    credentialsStore: CredentialStore? = null,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
+    // Production wires allowPlaintextFallback = BuildConfig.DEBUG so release
+    // fail-closes when Keystore-backed encryption is unavailable.
+    private val credentials: CredentialStore = credentialsStore
+        ?: CredentialStore(
+            context,
+            allowPlaintextFallback = com.example.ninebotplus.BuildConfig.DEBUG,
+        )
     private object Keys {
         val serverBaseUrl = stringPreferencesKey("server_base_url")
         val pushToken = stringPreferencesKey("push_device_token")

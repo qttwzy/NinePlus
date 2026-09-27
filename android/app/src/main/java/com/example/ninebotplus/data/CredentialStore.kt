@@ -12,12 +12,12 @@ import kotlinx.serialization.json.Json
 /**
  * Encrypted-at-rest storage for credentials (bearer token and login session).
  *
- * Failure policy:
- * - RELEASE: fail closed. If the Keystore-backed store cannot be created,
- *   credentials cannot be saved or loaded and [isAvailable] is false.
- *   The app must surface this to the user instead of silently downgrading.
- * - DEBUG: a plaintext fallback is allowed ONLY so local development and JVM
- *   tests can proceed. Never used for release artifacts.
+ * Failure policy (fail-closed):
+ * - RELEASE ([allowPlaintextFallback] = false): if the Keystore-backed store
+ *   cannot be created, credentials cannot be saved or loaded and
+ *   [isAvailable] is false. Never silently downgrade to plaintext.
+ * - DEBUG: a plaintext fallback is allowed ONLY when explicitly injected via
+ *   [allowPlaintextFallback] (production passes [com.example.ninebotplus.BuildConfig.DEBUG]).
  *
  * Auth model:
  * - Session token lives in [LoginResult] and is injected per request by
@@ -25,6 +25,7 @@ import kotlinx.serialization.json.Json
  */
 class CredentialStore(
     context: Context,
+    private val allowPlaintextFallback: Boolean = false,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
     private val prefs: SharedPreferences?
@@ -49,18 +50,18 @@ class CredentialStore(
         if (encrypted != null) {
             prefs = encrypted
             fallback = false
-        } else if (isDebugBuild()) {
-            // DEBUG only: plaintext so local development/tests can proceed.
-            // Release never reaches this branch — it fail-closes below.
+        } else if (allowPlaintextFallback) {
+            // Explicitly allowed (debug/tests only). Release passes false.
             prefs = context.getSharedPreferences("nineplus_credentials_debug", Context.MODE_PRIVATE)
             fallback = true
         } else {
+            // FAIL CLOSED: no plaintext downgrade.
             prefs = null
             fallback = true
         }
     }
 
-    /** False when the encrypted store could not be created and no debug fallback is allowed. */
+    /** False when the encrypted store could not be created and fallback is not allowed. */
     val isAvailable: Boolean
         get() = prefs != null
 
@@ -100,22 +101,9 @@ class CredentialStore(
         prefs?.edit()?.clear()?.apply()
     }
 
-    /**
-     * True when the store fell back to plaintext.
-     * Only acceptable in debug builds; release must not fall back.
-     */
+    /** True when the store fell back to plaintext (only possible when explicitly allowed). */
     val usingPlaintextFallback: Boolean
-        get() = fallback && isDebugBuild()
-
-    private fun isDebugBuild(): Boolean {
-        return try {
-            val clazz = Class.forName("com.example.ninebotplus.BuildConfig")
-            clazz.getField("DEBUG").getBoolean(null)
-        } catch (_: Exception) {
-            // Instrumentation / JVM tests: treat as debug-like so tests can run.
-            true
-        }
-    }
+        get() = fallback
 
     companion object {
         private const val KEY_BEARER = "bearer_token"
