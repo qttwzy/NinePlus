@@ -145,7 +145,32 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     color = if (pushToken.isNullOrBlank()) TeslaOrange else TeslaGreen,
                     fontSize = 12.sp,
                 )
-                OutlinedButton(onClick = { viewModel.enablePush() }) {
+                Text(
+                    "FCM 为可选能力：客户端管道已就绪，需要 Platform 配置 Android 推送并提供 google-services.json 后才能端到端工作。",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+                ) { granted ->
+                    if (granted) {
+                        viewModel.enablePush()
+                    } else {
+                        viewModel.clearMessages()
+                        // Surface a real denied state instead of pretending we asked.
+                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (android.os.Build.VERSION.SDK_INT >= 33) {
+                            notificationPermissionLauncher.launch(
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                            )
+                        } else {
+                            viewModel.enablePush()
+                        }
+                    },
+                ) {
                     Text("检查权限并上报推送")
                 }
             }
@@ -201,14 +226,14 @@ fun SettingsScreen(viewModel: AppViewModel) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("快捷能力", fontWeight = FontWeight.SemiBold)
+                Text("快捷入口", fontWeight = FontWeight.SemiBold)
                 Text(
-                    "App 快捷方式支持：刷新车况、查询电量、查询位置、寻车铃、打开座桶、上电、熄火、开始记录、打开行程。",
+                    "已支持：桌面组件快捷刷新、寻车铃，以及通知/桌面打开 App 的 deep link。",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "危险车控（开锁/关锁/座桶）在桌面与通知入口需系统确认。",
+                    "App Shortcuts / 语音助手指令尚未实现（计划中）。危险车控不会从桌面静默执行，需在 App 内确认。",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
