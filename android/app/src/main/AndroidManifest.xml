@@ -74,16 +74,24 @@
             android:name=".widget.VehicleStatusWidgetReceiver"
             android:exported="true">
             <intent-filter>
+                <!-- System-delivered only. Vehicle commands are NOT handled here.
+                     See WidgetActionReceiver (exported=false) and MainActivity. -->
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.ninebotplus.WIDGET_REFRESH" />
-                <action android:name="com.example.ninebotplus.WIDGET_BELL" />
-                <action android:name="com.example.ninebotplus.WIDGET_OPEN_BUCKET" />
-                <action android:name="com.example.ninebotplus.WIDGET_ENGINE_START" />
-                <action android:name="com.example.ninebotplus.WIDGET_ENGINE_STOP" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_vehicle_status_info" />
+        </receiver>
+
+        <!-- Internal widget actions (refresh / bell). Not exported: external
+             apps cannot drive vehicle state through this component. -->
+        <receiver
+            android:name=".widget.WidgetActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.ninebotplus.action.WIDGET_REFRESH" />
+                <action android:name="com.example.ninebotplus.action.WIDGET_BELL" />
+            </intent-filter>
         </receiver>
 
         <receiver

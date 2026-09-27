@@ -17,6 +17,18 @@ class NinePlusApp : Application() {
     lateinit var pushManager: PushManager
         private set
 
+    /** Navigation requests that arrive while the activity is already alive. */
+    private val _pendingRoute = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val pendingRoute: kotlinx.coroutines.flow.StateFlow<String?> = _pendingRoute
+
+    fun onNewRoute(route: String) {
+        _pendingRoute.value = route
+    }
+
+    fun consumeNewRoute() {
+        _pendingRoute.value = null
+    }
+
     override fun onCreate() {
         super.onCreate()
         settingsStore = SettingsStore(this)

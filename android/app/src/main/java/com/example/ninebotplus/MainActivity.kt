@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
                 NinePlusRoot(
                     app = app,
                     startRoute = startRoute,
+                    pendingAction = intent?.getStringExtra(EXTRA_PENDING_ACTION),
                 )
             }
         }
@@ -41,6 +42,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // Compose reads startRoute only once; re-trigger navigation from the new intent.
+        // Root observes this via a StateFlow below (pendingNavigation).
+        (application as NinePlusApp).onNewRoute(resolveStartRoute(intent.action, intent.data?.path))
     }
 
     private fun resolveStartRoute(action: String?, path: String?): String {
@@ -50,6 +54,12 @@ class MainActivity : ComponentActivity() {
             action == "com.example.ninebotplus.ACTION_SETTINGS" || path == "/settings" -> "settings"
             else -> "dashboard"
         }
+    }
+
+    companion object {
+        const val EXTRA_PENDING_ACTION = "pending_vehicle_action"
+        /** Widget / notification dangerous action: open app and require confirmation. */
+        const val ACTION_PENDING_VEHICLE_COMMAND = "com.example.ninebotplus.ACTION_PENDING_VEHICLE_COMMAND"
     }
 }
 

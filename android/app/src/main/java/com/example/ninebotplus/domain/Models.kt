@@ -849,20 +849,20 @@ data class VehicleAction(
             id = "engineStart",
             title = "上电",
             resultTitle = "上电指令已发送",
-            loadingTitle = "正在开锁",
+            loadingTitle = "正在上电",
             subtitle = "车辆进入可骑行状态",
             confirmationTitle = "车辆上电？",
-            confirmationMessage = "车辆会进入上电/解锁状态，请确认车辆在你身边。",
+            confirmationMessage = "车辆会进入上电状态，请确认车辆在你身边。",
             isDangerous = true,
         )
         val ENGINE_STOP = VehicleAction(
             id = "engineStop",
             title = "熄火",
             resultTitle = "熄火指令已发送",
-            loadingTitle = "正在关锁",
-            subtitle = "关闭电源并锁车",
+            loadingTitle = "正在熄火",
+            subtitle = "关闭电源",
             confirmationTitle = "车辆熄火？",
-            confirmationMessage = "车辆会进入熄火/锁车状态，请确认不会影响当前骑行。",
+            confirmationMessage = "车辆会进入熄火状态，请确认不会影响当前骑行。",
             isDangerous = true,
         )
 

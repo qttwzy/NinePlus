@@ -4,16 +4,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ninebotplus.MainActivity
 import com.example.ninebotplus.NinePlusApp
 import com.example.ninebotplus.ui.dashboard.DashboardScreen
 import com.example.ninebotplus.ui.recording.RecordingScreen
@@ -41,6 +43,7 @@ enum class AppTab(val route: String, val label: String, val icon: ImageVector) {
 fun NinePlusRoot(
     app: NinePlusApp,
     startRoute: String = "dashboard",
+    pendingAction: String? = null,
 ) {
     val viewModel: AppViewModel = viewModel(
         factory = AppViewModel.factory(app),
@@ -51,8 +54,32 @@ fun NinePlusRoot(
         )
     }
 
+    // onNewIntent delivers a new route while the activity is alive.
+    val newRoute by app.pendingRoute.collectAsState()
+    LaunchedEffect(newRoute) {
+        val route = newRoute ?: return@LaunchedEffect
+        selected = AppTab.entries.firstOrNull { it.route == route } ?: selected
+        app.consumeNewRoute()
+    }
+
     LaunchedEffect(Unit) {
         viewModel.initialize()
+    }
+
+    // Dangerous widget/notification actions land here and require confirmation.
+    if (pendingAction == MainActivity.ACTION_PENDING_VEHICLE_COMMAND) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("需要确认车控操作") },
+            text = {
+                Text("桌面组件不会直接执行上电/熄火/开座桶。请在车控页使用滑动或确认按钮操作车辆。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    selected = AppTab.DASHBOARD
+                }) { Text("前往车控") }
+            },
+        )
     }
 
     Scaffold(
