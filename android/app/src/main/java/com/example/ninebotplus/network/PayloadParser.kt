@@ -447,6 +447,10 @@ object PayloadParser {
     }
 
     private fun parseDate(value: JsonValue?): Date? {
+        return runCatching { parseDateUnsafe(value) }.getOrNull()
+    }
+
+    private fun parseDateUnsafe(value: JsonValue?): Date? {
         if (value == null) return null
         if (value is JsonValue.Num) {
             val number = value.value

@@ -71,24 +71,49 @@ object NineplusDates {
             is JsonDateInput.TextValue -> {
                 val text = value.value.trim()
                 if (text.isEmpty()) return null
-                structuredChinaDate(text)?.let { return it }
-                text.toDoubleOrNull()?.let { return epochDate(it) }
-                for (format in DATE_FORMATS) {
-                    parseWith(format)?.let { formatter ->
-                        formatter.parse(text)?.let { return it }
-                    }
-                }
-                return parseIso(text)
+                // Never let a single bad field crash parsing.
+                return runCatching { parseText(text) }.getOrNull()
             }
             null -> return null
         }
     }
 
+    private fun parseText(text: String): Date? {
+        structuredChinaDate(text)?.let { return it }
+        text.toDoubleOrNull()?.let { return epochDate(it) }
+        // Timestamps with 'T' / offsets go through ISO first so a loose
+        // "yyyy-MM-dd" prefix match cannot steal the date part.
+        if (text.contains('T') || text.contains('+') || text.endsWith('Z')) {
+            parseIso(text)?.let { return it }
+        }
+        for (format in DATE_FORMATS) {
+            parseFull(format, text)?.let { return it }
+        }
+        return parseIso(text)
+    }
+
     fun serverDate(raw: String?): Date? {
         if (raw.isNullOrBlank()) return null
         val text = raw.trim()
-        val format = if (text.length > 19) "yyyy-MM-dd HH:mm:ss.SSS" else "yyyy-MM-dd HH:mm:ss"
-        return parseWith(format)?.parse(text) ?: parse(JsonDateInput.TextValue(text))
+        return runCatching {
+            if (text.contains('T') || text.contains('+') || text.endsWith('Z')) {
+                parseIso(text)
+            } else {
+                parseFull("yyyy-MM-dd HH:mm:ss.SSS", text)
+                    ?: parseFull("yyyy-MM-dd HH:mm:ss", text)
+                    ?: parse(JsonDateInput.TextValue(text))
+            }
+        }.getOrNull()
+    }
+
+    /** SimpleDateFormat.parse only needs a prefix match — require full consumption. */
+    private fun parseFull(format: String, text: String): Date? {
+        val formatter = parseWith(format) ?: return null
+        return runCatching {
+            val pos = java.text.ParsePosition(0)
+            val date = formatter.parse(text, pos) ?: return@runCatching null
+            if (pos.index != text.length) null else date
+        }.getOrNull()
     }
 
     fun date(month: String?, day: Int): Date? {
@@ -160,24 +185,35 @@ object NineplusDates {
             8 -> "yyyyMMdd"
             else -> return null
         }
-        return parseWith(format)?.parse(text)
+        return parseWith(format)?.let { runCatching { it.parse(text) }.getOrNull() }
     }
 
+    /**
+     * ISO-8601 including Python `datetime.isoformat()` output
+     * (`2026-09-27T16:52:25.446895+00:00`) and Java `Instant` / `OffsetDateTime` forms.
+     *
+     * Never throws: SimpleDateFormat.parse raises ParseException on mismatch,
+     * which used to escape as "Unparseable date" and break the whole refresh.
+     */
     private fun parseIso(text: String): Date? {
-        val isoFormats = listOf(
-            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
-            "yyyy-MM-dd'T'HH:mm:ssZ",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS",
-            "yyyy-MM-dd'T'HH:mm:ss",
-        )
+        // 1) java.time is strict and handles variable fraction digits + offsets.
+        runCatching {
+            return Date(java.time.OffsetDateTime.parse(text).toInstant().toEpochMilli())
+        }
+        runCatching {
+            return Date(java.time.Instant.parse(text).toEpochMilli())
+        }
+        runCatching {
+            return Date(java.time.ZonedDateTime.parse(text).toInstant().toEpochMilli())
+        }
+
+        // 2) Fallback: SimpleDateFormat, each attempt caught.
+        val normalized = normalizeIso(text)
         for (format in isoFormats) {
-            parseWith(format)?.parse(normalizeIso(text))?.let { return it }
+            val parsed = parseWith(format)?.let { runCatching { it.parse(normalized) }.getOrNull() }
+            if (parsed != null) return parsed
         }
-        return try {
-            Date(java.time.Instant.parse(text).toEpochMilli())
-        } catch (_: Exception) {
-            null
-        }
+        return null
     }
 
     private fun normalizeIso(text: String): String =
@@ -191,6 +227,17 @@ object NineplusDates {
     } catch (_: Exception) {
         null
     }
+
+    private val isoFormats = listOf(
+        // Variable fractional seconds (Python isoformat can emit 3–6 digits).
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXX",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+        "yyyy-MM-dd'T'HH:mm:ss",
+    )
 
     private val DATE_FORMATS = listOf(
         "yyyy-MM-dd HH:mm:ss",
