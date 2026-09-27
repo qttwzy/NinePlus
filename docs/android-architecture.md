@@ -1,4 +1,4 @@
-# NinePlus Android 架构说明（第二轮整改后）
+# NinePlus Android 架构说明
 
 ## 总览
 
@@ -51,17 +51,19 @@ UI 使用「上电 / 熄火」，**不根据 `isLocked` 决定 engine 操作**�
 - **G 值 bug 已修复**：使用覆盖前的 `previousSpeed` 计算加速度
 - 生命周期：`STOPPED / PREVIEWING / RECORDING`；离开页面 `stopPreview()`
 - 持久化：`ActiveRideStore`（session 元数据 + JSONL 轨迹点 append）
-- **进程死亡恢复**：`RideRecordingService.onStartCommand` 是唯一恢复入口，检查 `hasActivePersistedSession()` 后 `restoreActiveSession()`
+- **进程死亡恢复**：`RideRecordingService.onStartCommand` 先 `startForeground`，再检查 `hasActivePersistedSession()` 并 `restoreActiveSession()`（磁盘 I/O 不阻塞进前台）
 - **职责分离**：`finishRecording()` 只管数据/GPS/Store；`stopForegroundAndSelf()` 只管 Service；二者不互相调用
 - 距离为增量累加（O(1)/样本），checkpoint 只 append 新点
 
 ## 地图
 
-- MapLibre GL（开源引擎，`MapLibre.getInstance` 在 Application 初始化）
-- **坐标 ownership**：domain 保留 WGS-84 原始点；`VehicleLocationMap` 是唯一 GCJ-02 转换点
-- 车辆位置：GeoJSON Point + CircleLayer（绑坐标，非屏幕 overlay）
+- MapLibre GL（`MapLibre.getInstance` 在 Application 初始化）
+- **Style**：显式 URI `https://demotiles.maplibre.org/style.json`（MapLibre 11.x 无 `streets` predefined style）
+- **坐标 ownership**：`MapProviderConfig.toMapCoordinate` 是唯一转换点
+  - 默认 MapLibre/OSM 底图 = **WGS-84，不转换**
+  - GCJ-02 仅在 `needsGcj02 = true`（换用国内 GCJ 瓦片）时启用
+- 车辆位置：GeoJSON Point + CircleLayer（绑坐标）
 - 本地轨迹：LineString + 起终点 CircleLayer + fit bounds
-- 默认 style：MapLibre `streets`（需可访问的 style/tile 源；国内可能需自备 style URI）
 - **服务器行程轨迹：❌ 未实现**（Platform 无稳定 normalized track contract）
 
 ## 缓存 / JSON
