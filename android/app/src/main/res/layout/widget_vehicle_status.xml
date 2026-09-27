@@ -88,14 +88,14 @@
             android:textSize="12sp" />
 
         <TextView
-            android:id="@+id/widgetLock"
+            android:id="@+id/widgetControl"
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_marginEnd="6dp"
             android:layout_weight="1"
             android:background="@drawable/widget_button"
             android:gravity="center"
-            android:text="开锁"
+            android:text="车控"
             android:textColor="@color/widget_text"
             android:textSize="12sp" />
 

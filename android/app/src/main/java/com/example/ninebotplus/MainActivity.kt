@@ -33,18 +33,32 @@ class MainActivity : ComponentActivity() {
                 NinePlusRoot(
                     app = app,
                     startRoute = startRoute,
-                    pendingAction = intent?.getStringExtra(EXTRA_PENDING_ACTION),
                 )
             }
         }
+
+        // Cold-start: translate Intent into a one-shot event too.
+        translateIntent(intent)?.let { app.onNavigationEvent(it) }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Compose reads startRoute only once; re-trigger navigation from the new intent.
-        // Root observes this via a StateFlow below (pendingNavigation).
-        (application as NinePlusApp).onNewRoute(resolveStartRoute(intent.action, intent.data?.path))
+        val app = application as NinePlusApp
+        // Single event contract: translate the Intent once and let Compose consume it.
+        translateIntent(intent)?.let { event ->
+            app.onNavigationEvent(event)
+        }
+        resolveStartRoute(intent.action, intent.data?.path).let { route ->
+            app.onNewRoute(route)
+        }
+    }
+
+    private fun translateIntent(intent: android.content.Intent): NavigationEvent? {
+        return when (intent.action) {
+            ACTION_PENDING_VEHICLE_COMMAND -> NavigationEvent.PendingVehicleCommand
+            else -> null
+        }
     }
 
     private fun resolveStartRoute(action: String?, path: String?): String {
@@ -57,10 +71,19 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        const val EXTRA_PENDING_ACTION = "pending_vehicle_action"
-        /** Widget / notification dangerous action: open app and require confirmation. */
+        /**
+         * Widget / notification dangerous action: open app and require confirmation.
+         * Translated into [NavigationEvent.PendingVehicleCommand] exactly once.
+         */
         const val ACTION_PENDING_VEHICLE_COMMAND = "com.example.ninebotplus.ACTION_PENDING_VEHICLE_COMMAND"
     }
+}
+
+/**
+ * One-shot navigation / confirmation events. Compose consumes and clears them.
+ */
+sealed class NavigationEvent {
+    data object PendingVehicleCommand : NavigationEvent()
 }
 
 @Composable

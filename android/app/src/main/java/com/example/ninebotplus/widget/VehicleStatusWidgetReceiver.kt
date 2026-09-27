@@ -109,7 +109,7 @@ class VehicleStatusWidgetReceiver : AppWidgetProvider() {
             // Dangerous action: open the app and let the user confirm.
             // NEVER execute engine start/stop or bucket open from a widget tap.
             views.setOnClickPendingIntent(
-                R.id.widgetLock,
+                R.id.widgetControl,
                 activityPendingIntent(context, MainActivity.ACTION_PENDING_VEHICLE_COMMAND, 4),
             )
             return views

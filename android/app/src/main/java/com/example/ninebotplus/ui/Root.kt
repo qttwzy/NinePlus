@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ninebotplus.MainActivity
+import com.example.ninebotplus.NavigationEvent
 import com.example.ninebotplus.NinePlusApp
 import com.example.ninebotplus.ui.dashboard.DashboardScreen
 import com.example.ninebotplus.ui.recording.RecordingScreen
@@ -66,18 +67,23 @@ fun NinePlusRoot(
         viewModel.initialize()
     }
 
-    // Dangerous widget/notification actions land here and require confirmation.
-    if (pendingAction == MainActivity.ACTION_PENDING_VEHICLE_COMMAND) {
+    // One-shot dangerous-action confirmation from widget / notification.
+    val navEvent by app.navEvents.collectAsState()
+    if (navEvent is NavigationEvent.PendingVehicleCommand) {
         AlertDialog(
-            onDismissRequest = { },
+            onDismissRequest = { app.consumeNavigationEvent() },
             title = { Text("需要确认车控操作") },
             text = {
-                Text("桌面组件不会直接执行上电/熄火/开座桶。请在车控页使用滑动或确认按钮操作车辆。")
+                Text("桌面组件不会直接执行上电/熄火/开座桶。请在车控页使用确认按钮操作车辆。")
             },
             confirmButton = {
                 TextButton(onClick = {
                     selected = AppTab.DASHBOARD
+                    app.consumeNavigationEvent()
                 }) { Text("前往车控") }
+            },
+            dismissButton = {
+                TextButton(onClick = { app.consumeNavigationEvent() }) { Text("关闭") }
             },
         )
     }

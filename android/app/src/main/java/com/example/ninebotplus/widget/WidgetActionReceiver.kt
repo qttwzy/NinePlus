@@ -43,18 +43,28 @@ class WidgetActionReceiver : BroadcastReceiver() {
             try {
                 val repository = newRepository(context)
                 repository.initialize()
-                val dashboard = runCatching { repository.refreshDashboard() }
-                    .getOrElse { repository.dashboard.value }
+                val startedAt = java.util.Date()
+                val result = runCatching { repository.refreshDashboard() }
+                val dashboard = result.getOrElse { repository.dashboard.value }
+                // Diagnostics must not lie: a cache fallback is not a success.
+                val success = result.isSuccess
+                val message = when {
+                    success -> dashboard.primaryVehicle?.vehicle?.name
+                    else -> "网络刷新失败，已显示缓存"
+                }
                 settings(context).saveLastWidgetRefresh(
                     com.example.ninebotplus.domain.RefreshEvent(
                         source = "Widget",
                         operation = "刷新车况",
-                        startedAt = java.util.Date(),
+                        startedAt = startedAt,
                         endedAt = java.util.Date(),
-                        success = true,
-                        message = dashboard.primaryVehicle?.vehicle?.name,
+                        success = success,
+                        message = message,
                     ),
                 )
+                if (!success) {
+                    settings(context).saveLastError(result.exceptionOrNull()?.message ?: "刷新失败")
+                }
                 VehicleStatusWidgetReceiver.refreshAll(context, dashboard)
             } finally {
                 pending.finish()
@@ -69,9 +79,26 @@ class WidgetActionReceiver : BroadcastReceiver() {
                 val repository = newRepository(context)
                 repository.initialize()
                 val sn = repository.dashboard.value.primaryVehicle?.vehicle?.sn
-                    ?: return@launch
-                runCatching {
-                    repository.performAction(VehicleAction.BELL, sn)
+                if (sn == null) {
+                    settings(context).saveLastError("没有找到可操作的车辆")
+                    return@launch
+                }
+                val result = runCatching {
+                    repository.performAction(com.example.ninebotplus.domain.VehicleAction.BELL, sn)
+                }
+                settings(context).saveLastWidgetRefresh(
+                    com.example.ninebotplus.domain.RefreshEvent(
+                        source = "Widget",
+                        operation = "寻车鸣笛",
+                        startedAt = java.util.Date(),
+                        endedAt = java.util.Date(),
+                        success = result.isSuccess,
+                        message = result.exceptionOrNull()?.message
+                            ?: "寻车指令已发送",
+                    ),
+                )
+                if (result.isFailure) {
+                    settings(context).saveLastError(result.exceptionOrNull()?.message ?: "寻车失败")
                 }
                 VehicleStatusWidgetReceiver.refreshAll(context, repository.dashboard.value)
             } finally {
