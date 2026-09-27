@@ -1,16 +1,9 @@
 # NinePlus Android
 
-原生 Android 客户端，对接 **NinePlus Platform**（server-only 架构，与 iOS 版一致）。
+原生 Android 客户端，对接 **NinePlus Platform**（server-only 架构）。
 
-```
-Android / iOS Client
-        ↓
-   HTTP + JSON
-        ↓
-NinePlus Platform
-        ↓
-九号云端 / 车辆
-```
+> **状态（第二轮整改后）**：核心链路（认证、Dashboard、车控、行程、本地记录、Widget）已实现并通过单元测试。
+> 真机/真车联调前请先跑 [DEVICE_TEST_PLAN.md](DEVICE_TEST_PLAN.md)。
 
 ## 技术栈
 
@@ -18,14 +11,14 @@ NinePlus Platform
 |---|---|
 | UI | Kotlin + Jetpack Compose + Material 3 |
 | 异步 | Coroutines + StateFlow |
-| 网络 | OkHttp + 自研轻量 API client |
-| JSON | kotlinx.serialization + 兼容解析层 `PayloadParser` |
-| 本地配置 | DataStore Preferences |
-| 本地业务数据 | Room（行程、轨迹点、历史快照） |
-| 地图 | MapLibre GL（开源，GCJ-02 纠偏内置） |
-| 后台 | WorkManager + Foreground Service（骑行记录） |
-| 推送 | FCM（可选，无 google-services.json 也可构建） |
-| 桌面组件 | AppWidgetProvider + RemoteViews |
+| 网络 | OkHttp + 轻量 API client |
+| JSON | kotlinx.serialization + `PayloadParser` 兼容层 |
+| 配置 | DataStore（URL）+ EncryptedSharedPreferences（凭证） |
+| 业务数据 | Room |
+| 地图 | MapLibre（GCJ-02 纠偏内置） |
+| 后台 | WorkManager + Foreground Service |
+| 推送 | FCM（可选，见下） |
+| 桌面组件 | AppWidgetProvider |
 
 最低 Android 8.0（API 26），target 35。
 
@@ -33,16 +26,16 @@ NinePlus Platform
 
 ```bash
 cd android
-./gradlew assembleDebug          # 调试包
+./gradlew assembleDebug          # 调试包（允许 LAN HTTP）
 ./gradlew testDebugUnitTest      # 单元测试
-./gradlew assembleRelease        # 发布包（需签名配置）
+./gradlew assembleRelease        # 发布包（无 keystore 时为未签名）
 ```
 
 需要 JDK 17，Android SDK Platform 35。
 
 ### Release 签名
 
-通过环境变量提供，**不要**把 keystore / 密码提交进仓库：
+**不会**自动回退到 debug 签名。通过环境变量提供：
 
 ```bash
 export NINEPLUS_KEYSTORE_PATH=/path/to/release.jks
@@ -52,75 +45,75 @@ export NINEPLUS_KEY_PASSWORD=...
 ./gradlew assembleRelease
 ```
 
-## 配置
+未配置时产物为 unsigned，需自行 `apksigner` 签名。
 
-1. 安装后进入「我的」
-2. 填写 NinePlus 服务器地址（例如 `http://192.168.1.10:19009`）
-3. 可选：App Bearer Token
-4. 手机号 + 密码登录（需勾选用户协议）
-5. 回到「车控」刷新
+## 网络与 cleartext
 
-## 功能对照（iOS ↔ Android）
+| 构建类型 | HTTP 明文 |
+|---|---|
+| debug | 允许（便于本地 `http://192.168.x.x:19009`） |
+| release | **拒绝**，仅 HTTPS |
 
-| iOS | Android | 状态 |
+配置见 `src/debug/res/xml/network_security_config.xml` 与 `src/release/...`。
+
+## 认证
+
+- Session token 规范来源是登录结果，经 `AuthAssembler` 注入 `X-NinePlus-Session`
+- App Bearer 与 session 可并存：`Authorization: Bearer …` + `X-NinePlus-Session`
+- 登出清 session；改服务器地址清 session
+- 凭证存 EncryptedSharedPreferences
+
+## 功能对照（诚实状态）
+
+| 能力 | 状态 | 说明 |
 |---|---|---|
-| Dashboard 车况 | 车控 Tab | ✅ |
-| 多车切换 | 切换车辆 Sheet | ✅ |
-| 寻车铃 / 座桶 / 上电 / 熄火 | 动作面板 + 危险操作确认 | ✅ |
-| 续航 / 电量 / 充电预测 | Hero + 电池卡 | ✅ |
-| 行程列表 / 月份归档 | 行程 Tab | ✅ |
-| 趋势分析 | 行程 Tab 趋势卡 | ✅（图表简化） |
-| 行程详情 / 轨迹 | 行程详情 | ✅（轨迹图后续增强） |
-| 本地骑行记录 | 记录 Tab + 前台服务 | ✅ |
-| WidgetKit 桌面组件 | AppWidget | ✅ |
-| Live Activity 充电 | 常驻充电通知 | ✅ |
-| Siri / App Intents | App Shortcuts + Deep Link | 部分（launcher shortcuts 可扩展） |
-| BGTaskScheduler | WorkManager | ✅ |
-| MapKit | MapLibre + Geocoder | ✅ |
-| 截图保护 | FLAG/隐私遮罩开关 | 部分 |
-| App Group 共享缓存 | DataStore + Room + files | ✅ |
+| Dashboard 电量/续航/充电/状态 | 🟡 | 已实现，需真车验证 |
+| 多车切换 | 🟡 | 已实现 |
+| 寻车铃 | 🟡 | 已实现 |
+| 上电 / 熄火 | 🟡 | 语义为电源（`pwr`），非锁车 |
+| 开座桶 | 🟡 | 已实现，危险操作有确认 |
+| 登录 / Session | ✅ | 已实现 + MockWebServer 测试 |
+| 行程列表 / 月份归档 | 🟡 | 已实现 |
+| 行程详情 | 🟡 | 字段展示完整 |
+| 服务器行程轨迹地图 | 🟠 | 启发式解析 raw，**未标完整** |
+| 本地骑行记录 | 🟡 | G 值/生命周期/持久化已修 |
+| 本地轨迹地图 | 🟡 | 折线 + fit bounds |
+| 车辆位置地图 | 🟡 | MapLibre + GCJ-02 |
+| Widget 刷新/寻车 | 🟡 | 安全边界已加固 |
+| Widget 危险操作 | ✅ | **不静默执行**，引导到 App 确认 |
+| 充电通知 | 🟡 | 本地驱动，不依赖 FCM |
+| FCM 远程推送 | 🟠 | 客户端管道就绪，**需 Platform + google-services.json** |
+| App Shortcuts / 语音 | ❌ | **未实现**（设置页已改文案） |
+| 截图保护 | 🟠 | UI 遮罩开关，非系统级 FLAG_SECURE |
+| 电池化学设置 UI | 🟠 | API 已通，完整设置面板待做 |
+
+图例：✅ 实现+测试 · 🟡 实现待真机验证 · 🟠 部分 · ❌ 未实现
 
 ## 权限
 
 | 权限 | 用途 |
 |---|---|
 | INTERNET | 访问 NinePlus Platform |
-| ACCESS_FINE/COARSE_LOCATION | 车辆位置展示、本地骑行记录 |
+| ACCESS_FINE/COARSE_LOCATION | 车辆位置、骑行记录 |
 | FOREGROUND_SERVICE_LOCATION | 骑行记录前台服务 |
-| POST_NOTIFICATIONS | 充电通知、记录状态 |
+| POST_NOTIFICATIONS | 充电/记录通知（Android 13+ 会真实请求） |
 
-## 地图与坐标
+## 推送（真实状态）
 
-车辆 GPS 为 WGS-84。`CoordinateTransform` 将坐标转为 GCJ-02 后上图（与 iOS `NinebotCoordinateTransform` 一致），适配国内地图瓦片。逆地理使用 Android `Geocoder`。
+```
+client plumbing available / server support required
+```
 
-## 推送
+- 充电常驻通知：**不依赖 FCM**，刷新车况后自动起停
+- 远程推送：需要
+  1. Firebase 项目 + `android/app/google-services.json`
+  2. `google-services` Gradle 插件
+  3. NinePlus Platform 支持 Android FCM 注册与下发
 
-- 本地充电通知不依赖 FCM，刷新车况后自动起停。
-- 若需远程推送（服务器主动通知）：
-  1. 在 Firebase 控制台创建 Android 应用
-  2. 放入 `android/app/google-services.json`
-  3. 在 `android/app/build.gradle.kts` 应用 `com.google.gms.google-services` 插件
-  4. NinePlus Platform 需支持 Android FCM device registration（`POST /devices/register` 已预留 `bundle_id`/`environment`）
+## 真机验证
 
-## 已知限制
-
-- 行程轨迹地图渲染为简化版（详情数据完整，地图绘制可继续增强）
-- App Shortcuts 静态声明可再补齐完整 XML
-- 截图保护目前为界面遮罩开关，未做系统级 `FLAG_SECURE` 全局切换
-- 电池化学设置 UI 尚未从电池详情完整接入
-- FCM 需自行提供 `google-services.json`
-
-## 真机验证清单
-
-1. 配置服务器 → 测试连接 → 登录
-2. 刷新车况，确认电量/续航/位置
-3. 多车切换
-4. 寻车铃（低风险）；开锁/关锁/座桶（确认弹层）
-5. 行程月份筛选与详情
-6. 开始骑行记录 → 后台 → 结束 → 查看本地记录
-7. 添加桌面小组件，点刷新
-8. 充电时查看通知
+见 [DEVICE_TEST_PLAN.md](DEVICE_TEST_PLAN.md)。
 
 ## 架构
 
-详见 [docs/android-architecture.md](../docs/android-architecture.md)。
+见 [docs/android-architecture.md](../docs/android-architecture.md)。
