@@ -69,14 +69,52 @@ class SettingsStore(
         return AuthAssembler.effectiveConfiguration(baseUrl, bearer, login)
     }
 
-    suspend fun saveServerUrl(baseUrl: String) {
-        val trimmed = baseUrl.trim()
-        val previous = context.settingsDataStore.data.first()[Keys.serverBaseUrl].orEmpty()
-        if (previous.trim() != trimmed && previous.isNotBlank() && trimmed.isNotBlank()) {
-            // Server changed: any existing session belongs to the old server.
+    /**
+     * Saves the server URL and invalidates the session when the canonical
+     * server identity changes (including A → "" → B).
+     *
+     * @return true when an existing login/session was cleared.
+     */
+    suspend fun saveServerUrl(baseUrl: String): Boolean {
+        val newCanonical = canonicalServer(baseUrl)
+        val previousCanonical = canonicalServer(
+            context.settingsDataStore.data.first()[Keys.serverBaseUrl].orEmpty(),
+        )
+        // ANY change of canonical server identity must drop the session.
+        val cleared = if (previousCanonical != newCanonical) {
             credentials.clearLoginResult()
+            true
+        } else {
+            false
         }
-        context.settingsDataStore.edit { it[Keys.serverBaseUrl] = trimmed }
+        context.settingsDataStore.edit { it[Keys.serverBaseUrl] = baseUrl.trim() }
+        return cleared
+    }
+
+    companion object {
+        /**
+         * Canonical server identity: trimmed, trailing slash removed,
+         * scheme/host lowercased. Used to decide when a session is invalid.
+         */
+        fun canonicalServer(raw: String): String {
+            var s = raw.trim().trimEnd('/')
+            if (s.isEmpty()) return ""
+            val schemeIdx = s.indexOf("://")
+            if (schemeIdx > 0) {
+                val scheme = s.substring(0, schemeIdx).lowercase()
+                val rest = s.substring(schemeIdx + 3)
+                val slash = rest.indexOf('/')
+                val host = if (slash >= 0) rest.substring(0, slash).lowercase() else rest.lowercase()
+                val path = if (slash >= 0) rest.substring(slash) else ""
+                s = "$scheme://$host$path"
+            } else {
+                val slash = s.indexOf('/')
+                val host = if (slash >= 0) s.substring(0, slash).lowercase() else s.lowercase()
+                val path = if (slash >= 0) s.substring(slash) else ""
+                s = host + path
+            }
+            return s
+        }
     }
 
     suspend fun saveBearerToken(token: String) {

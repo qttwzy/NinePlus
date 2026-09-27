@@ -2,6 +2,7 @@ package com.example.ninebotplus.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.ninebotplus.domain.LoginResult
@@ -11,23 +12,26 @@ import kotlinx.serialization.json.Json
 /**
  * Encrypted-at-rest storage for credentials (bearer token and login session).
  *
+ * Failure policy:
+ * - RELEASE: fail closed. If the Keystore-backed store cannot be created,
+ *   credentials cannot be saved or loaded and [isAvailable] is false.
+ *   The app must surface this to the user instead of silently downgrading.
+ * - DEBUG: a plaintext fallback is allowed ONLY so local development and JVM
+ *   tests can proceed. Never used for release artifacts.
+ *
  * Auth model:
- * - Server URL is non-sensitive and lives in [SettingsStore].
- * - App Bearer Token and the NinePlus session token are credentials and live here.
- * - The session token is the canonical source of truth for `X-NinePlus-Session`,
- *   mirroring iOS `LoginResult.sessionToken`. It is composed into every request
- *   via [com.example.ninebotplus.data.AuthAssembler].
- * - logout() and server URL change must clear the session so it can never leak
- *   across accounts or servers.
+ * - Session token lives in [LoginResult] and is injected per request by
+ *   [AuthAssembler]. Logout and server-URL change clear it.
  */
 class CredentialStore(
     context: Context,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
-    private val prefs: SharedPreferences = createPrefs(context)
+    private val prefs: SharedPreferences?
+    private val fallback: Boolean
 
-    private fun createPrefs(context: Context): SharedPreferences {
-        return try {
+    init {
+        val encrypted = try {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
@@ -39,37 +43,78 @@ class CredentialStore(
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
             )
         } catch (_: Exception) {
-            // Some devices / test environments lack StrongBox; fall back to
-            // a private SharedPreferences rather than crash. Documented limitation.
-            context.getSharedPreferences("nineplus_credentials_fallback", Context.MODE_PRIVATE)
+            null
+        }
+
+        if (encrypted != null) {
+            prefs = encrypted
+            fallback = false
+        } else if (isDebugBuild()) {
+            // DEBUG only: plaintext so local development/tests can proceed.
+            // Release never reaches this branch — it fail-closes below.
+            prefs = context.getSharedPreferences("nineplus_credentials_debug", Context.MODE_PRIVATE)
+            fallback = true
+        } else {
+            prefs = null
+            fallback = true
         }
     }
 
-    fun loadBearerToken(): String =
-        prefs.getString(KEY_BEARER, null)?.trim().orEmpty()
+    /** False when the encrypted store could not be created and no debug fallback is allowed. */
+    val isAvailable: Boolean
+        get() = prefs != null
+
+    private fun requirePrefs(): SharedPreferences {
+        return prefs ?: throw CredentialUnavailableException()
+    }
+
+    fun loadBearerToken(): String {
+        val p = prefs ?: return ""
+        return p.getString(KEY_BEARER, null)?.trim().orEmpty()
+    }
 
     fun saveBearerToken(token: String) {
-        prefs.edit().putString(KEY_BEARER, token.trim()).apply()
+        requirePrefs().edit().putString(KEY_BEARER, token.trim()).apply()
     }
 
     fun loadLoginResult(): LoginResult? {
-        val raw = prefs.getString(KEY_LOGIN, null) ?: return null
+        val p = prefs ?: return null
+        val raw = p.getString(KEY_LOGIN, null) ?: return null
         return runCatching {
             json.decodeFromString<LoginResultDto>(raw).toDomain()
         }.getOrNull()
     }
 
     fun saveLoginResult(result: LoginResult) {
-        prefs.edit().putString(KEY_LOGIN, json.encodeToString(LoginResultDto.from(result))).apply()
+        requirePrefs().edit()
+            .putString(KEY_LOGIN, json.encodeToString(LoginResultDto.from(result)))
+            .apply()
     }
 
     fun clearLoginResult() {
-        prefs.edit().remove(KEY_LOGIN).apply()
+        prefs?.edit()?.remove(KEY_LOGIN)?.apply()
     }
 
     /** Drop every credential. Used on logout and on server URL change. */
     fun clearAll() {
-        prefs.edit().clear().apply()
+        prefs?.edit()?.clear()?.apply()
+    }
+
+    /**
+     * True when the store fell back to plaintext.
+     * Only acceptable in debug builds; release must not fall back.
+     */
+    val usingPlaintextFallback: Boolean
+        get() = fallback && isDebugBuild()
+
+    private fun isDebugBuild(): Boolean {
+        return try {
+            val clazz = Class.forName("com.example.ninebotplus.BuildConfig")
+            clazz.getField("DEBUG").getBoolean(null)
+        } catch (_: Exception) {
+            // Instrumentation / JVM tests: treat as debug-like so tests can run.
+            true
+        }
     }
 
     companion object {
@@ -77,3 +122,6 @@ class CredentialStore(
         private const val KEY_LOGIN = "login_result"
     }
 }
+
+class CredentialUnavailableException :
+    Exception("设备安全存储不可用，无法保存登录凭据。请检查系统 Keystore 后重试。")

@@ -79,8 +79,12 @@ class VehicleRepository(
     suspend fun configuration(): ServerConfiguration = settings.effectiveConfiguration()
 
     suspend fun saveConfiguration(configuration: ServerConfiguration) {
-        settings.saveServerUrl(configuration.baseUrlString)
+        val sessionCleared = settings.saveServerUrl(configuration.baseUrlString)
         settings.saveBearerToken(configuration.bearerToken)
+        if (sessionCleared) {
+            // Sync in-memory login state immediately so UI cannot show a stale account.
+            _loginResult.value = null
+        }
         // Session is never persisted with the URL; rebuild the effective config.
         currentConfigurationCache = settings.effectiveConfiguration()
     }

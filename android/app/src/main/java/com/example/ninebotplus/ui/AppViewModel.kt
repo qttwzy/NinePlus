@@ -244,14 +244,29 @@ class AppViewModel(
     fun enablePush() {
         viewModelScope.launch {
             runOperation("正在开启充电通知") {
-                repository.registerPushTokenToServer()
-                if (repository.pushToken.value == null) {
-                    status("请先在系统设置中允许通知，并确保已配置推送")
-                } else {
+                // registerPushTokenToServer throws when no token; surface a clear reason.
+                try {
+                    repository.registerPushTokenToServer()
                     status("充电通知已开启")
+                } catch (e: Exception) {
+                    val msg = e.message.orEmpty()
+                    when {
+                        msg.contains("Token", ignoreCase = true) || msg.contains("token") ->
+                            status("推送设备 Token 尚未就绪（FCM 未配置或服务端未开通），本地充电通知仍可工作")
+                        msg.contains("通知权限") ->
+                            status("通知权限未授权，请在系统设置中允许通知")
+                        else -> error(msg.ifBlank { "推送上报失败" })
+                    }
                 }
             }
         }
+    }
+
+    fun setNotificationPermissionDenied() {
+        _uiState.value = _uiState.value.copy(
+            errorMessage = "通知权限未授权，充电/记录通知将无法显示",
+            statusMessage = null,
+        )
     }
 
     fun resolveAddressesNow() {
