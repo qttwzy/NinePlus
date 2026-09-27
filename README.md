@@ -1,53 +1,86 @@
 # NineBot+
 
-NineBot+ is a personal iOS app for viewing and managing Ninebot vehicle status, with Home Screen widgets, Lock Screen widgets, Siri Shortcuts, trip history, location views, and local ride recording.
-
-This project is intended for personal builds. It is not configured for App Store distribution by default.
+NineBot+ is a personal client for viewing and managing Ninebot vehicle status. It talks to a **NinePlus Platform** server (server-only architecture) and provides dashboards, widgets, trip history, and local ride recording.
 
 Telegram: https://t.me/ninebotultra
 
 > **Branch notice:** `main` is server-only and no longer includes the dual-mode connection path. Use the `nine-proxy` branch when dual-mode support is required.
 
-## Features
+## Clients
+
+| Client | Path | Status |
+|---|---|---|
+| iOS (SwiftUI) | `mini-ninebot/` | Maintained |
+| Android (Kotlin + Compose) | `android/` | In progress — core flows implemented |
+
+## Features (both platforms)
 
 - Vehicle dashboard with battery, estimated range, status, charging state, and location.
-- Home Screen and Lock Screen widgets.
-- Siri Shortcuts and App Intents support.
-- Trip history, mileage trends, and local ride recording.
-- MapKit vehicle location and reverse geocoding.
-- Local cache shared between the app and widgets through App Groups.
+- Multi-vehicle switch.
+- Vehicle controls: ring bell, open seat bucket, engine start/stop.
+- Trip history, mileage trends, local ride recording.
+- Map with GCJ-02 coordinate transform for mainland China.
+- Home screen widgets.
+- Charging notifications / live status.
+- Local cache with offline fallback.
 
-## Requirements
+## Repository layout
 
-- macOS with Xcode.
-- An Apple Developer account for device signing.
-- A configured iOS device.
-- A reachable NinePlus Platform server.
+```
+NinePlus/
+├── mini-ninebot/          # iOS app + widgets
+├── android/               # Android app (Jetpack Compose)
+├── docs/                  # Architecture notes
+└── README.md
+```
 
-## Build
+## iOS build
 
-1. Clone the repository.
-2. Open `mini-ninebot/mini-ninebot.xcodeproj` in Xcode.
-3. Select your Apple Developer Team for the app target and the `NinebotWidgets` target.
-4. Replace the sample Bundle IDs with your own:
-   - App: `com.example.NineBotPlus`
-   - Widgets: `com.example.NineBotPlus.NinebotWidgets`
-5. Enable the same App Group for both targets, for example `group.com.example.NineBotPlus`.
-6. Build and run on a physical iPhone.
+See [mini-ninebot/README.md](mini-ninebot/README.md). Requires Xcode, Apple Developer signing, and a reachable NinePlus Platform server.
 
-## Setup
+## Android build
 
-1. Open the app on the iPhone.
-2. Go to the profile/settings tab.
+See [android/README.md](android/README.md).
+
+```bash
+cd android
+./gradlew assembleDebug
+./gradlew testDebugUnitTest
+```
+
+Requires JDK 17 and Android SDK 35. Architecture notes: [docs/android-architecture.md](docs/android-architecture.md).
+
+## NinePlus Platform
+
+The clients do **not** connect to Ninebot cloud directly. They call a NinePlus Platform that polls the vehicle cloud and exposes a stable HTTP+JSON API:
+
+```
+Client → NinePlus Platform → 九号云端 / 车辆
+```
+
+Typical endpoints used by clients:
+
+- `POST /accounts/login`
+- `GET /vehicles`, `GET /vehicles/{sn}/dashboard|status|battery|prediction`
+- `GET|POST /vehicles/{sn}/travel*`
+- `POST /vehicles/{sn}/bell|buck|engine/start|engine/stop`
+- `POST /devices/register` (push)
+
+Clients send `Authorization: Bearer <app token>` (optional) and `X-NinePlus-Session` (after login).
+
+## Setup (quick)
+
+1. Build and install the client.
+2. Open **我的 / Settings**.
 3. Enter your NinePlus server address and optional App Bearer Token.
-4. Bind your account.
-5. Return to the vehicle dashboard and refresh.
-6. Add the Home Screen or Lock Screen widgets after the first successful refresh.
-
-## Widgets
-
-Widgets read the latest cached vehicle snapshot from the shared App Group container. iOS controls widget background refresh frequency, so opening the app and refreshing manually is the fastest way to update widget data immediately.
+4. Bind your account (phone + password).
+5. Refresh the dashboard.
+6. Add widgets / enable charging notifications as needed.
 
 ## Privacy
 
-The app stores configuration, login state, vehicle snapshots, cached addresses, trip records, and local ride records on the device. Do not commit personal tokens, account data, signing certificates, provisioning profiles, or generated build artifacts to this repository.
+Configuration, login state, vehicle snapshots, trip records, and local ride records stay on device. Do not commit personal tokens, account data, signing certificates, or build artifacts.
+
+## License / distribution
+
+Personal builds by default; not configured for App Store / Play Store distribution.
