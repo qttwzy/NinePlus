@@ -50,14 +50,19 @@ UI 使用「上电 / 熄火」，**不根据 `isLocked` 决定 engine 操作**�
 - 纯计算在 `RideMath`（可单测）：G 值、平滑、采样过滤
 - **G 值 bug 已修复**：使用覆盖前的 `previousSpeed` 计算加速度
 - 生命周期：`STOPPED / PREVIEWING / RECORDING`；离开页面 `stopPreview()`
-- 持久化：`ActiveRideStore`（session 元数据 + JSONL 轨迹点 checkpoint）
+- 持久化：`ActiveRideStore`（session 元数据 + JSONL 轨迹点 append）
+- **进程死亡恢复**：`RideRecordingService.onStartCommand` 是唯一恢复入口，检查 `hasActivePersistedSession()` 后 `restoreActiveSession()`
+- **职责分离**：`finishRecording()` 只管数据/GPS/Store；`stopForegroundAndSelf()` 只管 Service；二者不互相调用
+- 距离为增量累加（O(1)/样本），checkpoint 只 append 新点
 
 ## 地图
 
-- MapLibre，坐标 GCJ-02 纠偏后上图
-- 车辆位置地图：标记 + 相机
-- 本地骑行轨迹地图：折线 + fit bounds + 起终点
-- 服务器行程轨迹：依赖 raw 字段启发式解析，**未标为完整实现**
+- MapLibre GL（开源引擎，`MapLibre.getInstance` 在 Application 初始化）
+- **坐标 ownership**：domain 保留 WGS-84 原始点；`VehicleLocationMap` 是唯一 GCJ-02 转换点
+- 车辆位置：GeoJSON Point + CircleLayer（绑坐标，非屏幕 overlay）
+- 本地轨迹：LineString + 起终点 CircleLayer + fit bounds
+- 默认 style：MapLibre `streets`（需可访问的 style/tile 源；国内可能需自备 style URI）
+- **服务器行程轨迹：❌ 未实现**（Platform 无稳定 normalized track contract）
 
 ## 缓存 / JSON
 

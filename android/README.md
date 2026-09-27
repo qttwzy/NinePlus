@@ -72,15 +72,15 @@ export NINEPLUS_KEY_PASSWORD=...
 | 寻车铃 | 🟡 | 已实现 |
 | 上电 / 熄火 | 🟡 | 语义为电源（`pwr`），非锁车 |
 | 开座桶 | 🟡 | 已实现，危险操作有确认 |
-| 登录 / Session | ✅ | 已实现 + MockWebServer 测试 |
+| 登录 / Session | ✅ | 含服务器切换失效 + MockWebServer 测试 |
 | 行程列表 / 月份归档 | 🟡 | 已实现 |
 | 行程详情 | 🟡 | 字段展示完整 |
-| 服务器行程轨迹地图 | 🟠 | 启发式解析 raw，**未标完整** |
-| 本地骑行记录 | 🟡 | G 值/生命周期/持久化已修 |
-| 本地轨迹地图 | 🟡 | 折线 + fit bounds |
-| 车辆位置地图 | 🟡 | MapLibre + GCJ-02 |
+| 服务器行程轨迹地图 | ❌ | Platform 无稳定 track contract，**未实现** |
+| 本地骑行记录 | 🟡 | G 值/恢复/职责分离已修 |
+| 本地轨迹地图 | 🟡 | 折线 + 真实起终点 + fit bounds |
+| 车辆位置地图 | 🟡 | MapLibre GeoJSON 标记 + 单次 GCJ-02 |
 | Widget 刷新/寻车 | 🟡 | 安全边界已加固 |
-| Widget 危险操作 | ✅ | **不静默执行**，引导到 App 确认 |
+| Widget 危险操作 | ✅ | 不静默执行；一次性确认 Dialog（可关闭） |
 | 充电通知 | 🟡 | 本地驱动，不依赖 FCM |
 | FCM 远程推送 | 🟠 | 客户端管道就绪，**需 Platform + google-services.json** |
 | App Shortcuts / 语音 | ❌ | **未实现**（设置页已改文案） |
