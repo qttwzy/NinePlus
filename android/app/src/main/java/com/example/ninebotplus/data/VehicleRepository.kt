@@ -64,7 +64,7 @@ class VehicleRepository(
     val pushToken: StateFlow<String?> = _pushToken.asStateFlow()
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
-        currentConfigurationCache = settings.configuration()
+        currentConfigurationCache = settings.effectiveConfiguration()
         _loginResult.value = settings.loginResult()
         _resolvedAddresses.value = settings.resolvedAddresses()
         _lastError.value = settings.lastError()
@@ -76,11 +76,13 @@ class VehicleRepository(
         loadCachedDashboard()?.let { _dashboard.value = it }
     }
 
-    suspend fun configuration(): ServerConfiguration = settings.configuration()
+    suspend fun configuration(): ServerConfiguration = settings.effectiveConfiguration()
 
     suspend fun saveConfiguration(configuration: ServerConfiguration) {
-        settings.saveConfiguration(configuration)
-        currentConfigurationCache = configuration
+        settings.saveServerUrl(configuration.baseUrlString)
+        settings.saveBearerToken(configuration.bearerToken)
+        // Session is never persisted with the URL; rebuild the effective config.
+        currentConfigurationCache = settings.effectiveConfiguration()
     }
 
     suspend fun testConnection() {
@@ -92,16 +94,18 @@ class VehicleRepository(
         val configuration = requireConfiguration()
         val result = NinePlusApiClient(configuration).login(account, password)
         val normalized = result.copy(phone = result.phone?.takeIf { it.isNotBlank() } ?: account)
+        // Canonical session source is LoginResult; AuthAssembler injects it
+        // into every subsequent request (App, Widget, Worker).
         settings.saveLoginResult(normalized)
-        settings.saveConfiguration(
-            configuration.copy(appSessionToken = normalized.sessionToken),
-        )
         _loginResult.value = normalized
+        currentConfigurationCache = settings.effectiveConfiguration()
     }
 
     suspend fun logout() {
         settings.clearLoginResult()
         _loginResult.value = null
+        // Drop the in-memory cache so the next request cannot reuse a session.
+        currentConfigurationCache = settings.effectiveConfiguration()
     }
 
     suspend fun refreshDashboard(selectedSn: String? = null): Dashboard {
@@ -205,10 +209,8 @@ class VehicleRepository(
                 vehicleSn = sn,
                 rideId = rideId,
                 fetchedAt = detail.fetchedAt.time,
-                rawJson = NinePlusJson.encodeToString(JsonValue.toElement(detail.raw).toString().let {
-                    // store raw as JSON text
-                    detail.raw.let { raw -> encodeJson(raw) }
-                }),
+                // Store the raw payload as a JSON object text (NOT a JSON string literal).
+                rawJson = encodeJson(detail.raw),
             ),
         )
         return detail
@@ -293,7 +295,7 @@ class VehicleRepository(
     }
 
     suspend fun diagnostics(): com.example.ninebotplus.domain.DiagnosticsSnapshot {
-        val configuration = settings.configuration()
+        val configuration = settings.effectiveConfiguration()
         val dashboard = _dashboard.value
         val vehicles = dashboard.vehicles
         val interfaceRideCount = vehicles.sumOf { dao.interfaceRideCount(it.vehicle.sn) }
@@ -333,7 +335,9 @@ class VehicleRepository(
     fun resolvedAddress(sn: String): String? = _resolvedAddresses.value[sn]?.address
 
     private suspend fun requireConfiguration(): ServerConfiguration {
-        val configuration = currentConfigurationCache ?: settings.configuration().also {
+        // Always re-assemble so a fresh LoginResult is picked up and a cleared
+        // one cannot linger in the cache (logout / server change).
+        val configuration = settings.effectiveConfiguration().also {
             currentConfigurationCache = it
         }
         if (!configuration.isUsable) throw ApiException.MissingServer()

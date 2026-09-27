@@ -7,7 +7,6 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.example.ninebotplus.domain.Dashboard
 import com.example.ninebotplus.domain.LoginResult
 import com.example.ninebotplus.domain.RefreshEvent
 import com.example.ninebotplus.domain.ResolvedAddress
@@ -22,18 +21,18 @@ import java.util.Date
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "nineplus_settings")
 
 /**
- * App settings / auth / cache store.
- * Large payloads (rides, track points) live in Room; this store keeps config,
- * login session, small caches and diagnostics events.
+ * Non-sensitive app settings + cache.
+ *
+ * Credentials (bearer / session) live in [CredentialStore].
+ * The effective API configuration is assembled by [AuthAssembler].
  */
 class SettingsStore(
     private val context: Context,
+    private val credentials: CredentialStore = CredentialStore(context),
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
     private object Keys {
         val serverBaseUrl = stringPreferencesKey("server_base_url")
-        val serverBearer = stringPreferencesKey("server_bearer")
-        val loginResult = stringPreferencesKey("login_result")
         val pushToken = stringPreferencesKey("push_device_token")
         val capturePrivacy = booleanPreferencesKey("capture_privacy")
         val pendingRoute = stringPreferencesKey("pending_route")
@@ -42,43 +41,58 @@ class SettingsStore(
         val lastWidgetRefresh = stringPreferencesKey("last_widget_refresh")
         val resolvedAddresses = stringPreferencesKey("resolved_addresses")
         val dashboardCache = stringPreferencesKey("dashboard_cache")
+        val activeRideId = stringPreferencesKey("active_ride_id")
     }
 
-    val configurationFlow: Flow<ServerConfiguration> = context.settingsDataStore.data.map { prefs ->
-        ServerConfiguration(
-            baseUrlString = prefs[Keys.serverBaseUrl].orEmpty(),
-            bearerToken = prefs[Keys.serverBearer].orEmpty(),
-            appSessionToken = null,
-        )
+    val serverBaseUrlFlow: Flow<String> = context.settingsDataStore.data.map {
+        it[Keys.serverBaseUrl].orEmpty()
     }
 
-    val loginResultFlow: Flow<LoginResult?> = context.settingsDataStore.data.map { prefs ->
-        prefs[Keys.loginResult]?.let { runCatching { json.decodeFromString<LoginResultDto>(it) }.getOrNull()?.toDomain() }
+    val loginResultFlow: Flow<LoginResult?> = context.settingsDataStore.data.map {
+        credentials.loadLoginResult()
     }
 
-    val capturePrivacyFlow: Flow<Boolean> = context.settingsDataStore.data.map { it[Keys.capturePrivacy] ?: false }
+    val capturePrivacyFlow: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[Keys.capturePrivacy] ?: false
+    }
 
     val pushTokenFlow: Flow<String?> = context.settingsDataStore.data.map { it[Keys.pushToken] }
 
-    suspend fun configuration(): ServerConfiguration = configurationFlow.first()
-
-    suspend fun saveConfiguration(configuration: ServerConfiguration) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[Keys.serverBaseUrl] = configuration.baseUrlString.trim()
-            prefs[Keys.serverBearer] = configuration.bearerToken.trim()
-        }
+    /**
+     * Effective configuration for every API caller (App, Widget, Worker).
+     * Session token always comes from the persisted login result.
+     */
+    suspend fun effectiveConfiguration(): ServerConfiguration {
+        val baseUrl = context.settingsDataStore.data.first()[Keys.serverBaseUrl].orEmpty()
+        val bearer = credentials.loadBearerToken()
+        val login = credentials.loadLoginResult()
+        return AuthAssembler.effectiveConfiguration(baseUrl, bearer, login)
     }
 
-    suspend fun loginResult(): LoginResult? = loginResultFlow.first()
+    suspend fun saveServerUrl(baseUrl: String) {
+        val trimmed = baseUrl.trim()
+        val previous = context.settingsDataStore.data.first()[Keys.serverBaseUrl].orEmpty()
+        if (previous.trim() != trimmed && previous.isNotBlank() && trimmed.isNotBlank()) {
+            // Server changed: any existing session belongs to the old server.
+            credentials.clearLoginResult()
+        }
+        context.settingsDataStore.edit { it[Keys.serverBaseUrl] = trimmed }
+    }
+
+    suspend fun saveBearerToken(token: String) {
+        credentials.saveBearerToken(token)
+    }
+
+    suspend fun bearerToken(): String = credentials.loadBearerToken()
+
+    suspend fun loginResult(): LoginResult? = credentials.loadLoginResult()
 
     suspend fun saveLoginResult(result: LoginResult) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[Keys.loginResult] = json.encodeToString(LoginResultDto.from(result))
-        }
+        credentials.saveLoginResult(result)
     }
 
     suspend fun clearLoginResult() {
-        context.settingsDataStore.edit { it.remove(Keys.loginResult) }
+        credentials.clearLoginResult()
     }
 
     suspend fun pushToken(): String? = pushTokenFlow.first()
@@ -156,6 +170,14 @@ class SettingsStore(
 
     suspend fun saveDashboardCache(raw: String) {
         context.settingsDataStore.edit { it[Keys.dashboardCache] = raw }
+    }
+
+    suspend fun activeRideId(): String? = context.settingsDataStore.data.first()[Keys.activeRideId]
+
+    suspend fun setActiveRideId(id: String?) {
+        context.settingsDataStore.edit { prefs ->
+            if (id.isNullOrBlank()) prefs.remove(Keys.activeRideId) else prefs[Keys.activeRideId] = id
+        }
     }
 }
 
