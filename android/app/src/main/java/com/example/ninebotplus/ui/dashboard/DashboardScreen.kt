@@ -69,6 +69,7 @@ fun DashboardScreen(viewModel: AppViewModel) {
     var confirmAction by remember { mutableStateOf<VehicleAction?>(null) }
     var confirmSn by remember { mutableStateOf<String?>(null) }
     var showRangeInfo by remember { mutableStateOf(false) }
+    var showMap by remember { mutableStateOf(false) }
 
     val primary = dashboard.primaryVehicle
 
@@ -112,7 +113,7 @@ fun DashboardScreen(viewModel: AppViewModel) {
             snapshot = vehicle,
             resolvedAddress = resolved[vehicle.vehicle.sn]?.address,
             onSwitchVehicle = { showSwitcher = true },
-            onOpenMap = { /* map sheet handled below via expanded detail */ },
+            onOpenMap = { showMap = true },
             onShowRangeInfo = { showRangeInfo = true },
             canSwitch = dashboard.vehicles.size > 1,
         )
@@ -138,6 +139,7 @@ fun DashboardScreen(viewModel: AppViewModel) {
             snapshot = vehicle,
             resolvedAddress = resolved[vehicle.vehicle.sn]?.address,
             privacyEnabled = viewModel.capturePrivacy.collectAsState().value,
+            onOpenMap = { showMap = true },
         )
 
         BatteryCard(snapshot = vehicle)
@@ -209,6 +211,42 @@ fun DashboardScreen(viewModel: AppViewModel) {
             },
             confirmButton = {
                 TextButton(onClick = { showRangeInfo = false }) { Text("知道了") }
+            },
+        )
+    }
+
+    if (showMap) {
+        val lat = vehicle.state.latitude
+        val lon = vehicle.state.longitude
+        AlertDialog(
+            onDismissRequest = { showMap = false },
+            title = { Text("车辆位置") },
+            text = {
+                if (lat == null || lon == null) {
+                    Text("车辆暂无可显示的坐标")
+                } else {
+                    androidx.compose.foundation.layout.Column {
+                        com.example.ninebotplus.ui.map.VehicleLocationMap(
+                            latitude = lat,
+                            longitude = lon,
+                            title = vehicle.vehicle.name,
+                            privacyEnabled = viewModel.capturePrivacy.collectAsState().value,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(280.dp),
+                        )
+                        Text(
+                            resolved[vehicle.vehicle.sn]?.address
+                                ?: vehicle.state.locationText,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showMap = false }) { Text("关闭") }
             },
         )
     }
@@ -377,9 +415,12 @@ private fun ActionPanel(
         ) {
             ActionButton("寻车", enabled = !isLoading) { onAction(VehicleAction.BELL) }
             ActionButton("座桶", enabled = !isLoading) { onAction(VehicleAction.OPEN_BUCKET) }
-            val unlocked = snapshot.state.isLocked == false
-            ActionButton(if (unlocked) "关锁" else "开锁", enabled = !isLoading, emphasized = true) {
-                onAction(if (unlocked) VehicleAction.ENGINE_STOP else VehicleAction.ENGINE_START)
+            // Engine start/stop is a POWER action, not a lock action.
+            // Platform endpoint is /engine/start|stop and maps to `pwr`.
+            // Do NOT drive it from isLocked / lock_status.
+            val poweredOn = snapshot.state.isPoweredOn == true
+            ActionButton(if (poweredOn) "熄火" else "上电", enabled = !isLoading, emphasized = true) {
+                onAction(if (poweredOn) VehicleAction.ENGINE_STOP else VehicleAction.ENGINE_START)
             }
         }
     }
@@ -433,11 +474,14 @@ private fun LocationRideCards(
     snapshot: VehicleSnapshot,
     resolvedAddress: String?,
     privacyEnabled: Boolean,
+    onOpenMap: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(
             shape = RoundedCornerShape(18.dp),
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onOpenMap),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(Modifier.padding(14.dp)) {
