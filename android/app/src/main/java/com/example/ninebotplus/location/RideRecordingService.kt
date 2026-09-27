@@ -42,10 +42,8 @@ class RideRecordingService : Service() {
                 return START_NOT_STICKY
             }
             else -> {
-                // Single restore entry for process death / sticky restart.
-                if (!recorder.isRecording && recorder.hasActivePersistedSession()) {
-                    recorder.restoreActiveSession()
-                }
+                // Enter foreground FIRST (Android requires timely startForeground
+                // after startForegroundService). Disk restore comes after.
                 val notification = buildNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     ServiceCompat.startForeground(
@@ -56,6 +54,12 @@ class RideRecordingService : Service() {
                     )
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
+                }
+
+                // Single restore entry for process death / sticky restart.
+                // This does disk I/O; it must not block startForeground above.
+                if (!recorder.isRecording && recorder.hasActivePersistedSession()) {
+                    recorder.restoreActiveSession()
                 }
                 // Ensure GPS is running whether we just restored or were already recording.
                 recorder.startPreview()
