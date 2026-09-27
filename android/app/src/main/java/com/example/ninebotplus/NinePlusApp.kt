@@ -21,12 +21,24 @@ class NinePlusApp : Application() {
     private val _pendingRoute = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val pendingRoute: kotlinx.coroutines.flow.StateFlow<String?> = _pendingRoute
 
+    /** One-shot events (e.g. widget dangerous-action confirmation). */
+    private val _navEvents = kotlinx.coroutines.flow.MutableStateFlow<NavigationEvent?>(null)
+    val navEvents: kotlinx.coroutines.flow.StateFlow<NavigationEvent?> = _navEvents
+
     fun onNewRoute(route: String) {
         _pendingRoute.value = route
     }
 
     fun consumeNewRoute() {
         _pendingRoute.value = null
+    }
+
+    fun onNavigationEvent(event: NavigationEvent) {
+        _navEvents.value = event
+    }
+
+    fun consumeNavigationEvent() {
+        _navEvents.value = null
     }
 
     override fun onCreate() {
@@ -36,6 +48,18 @@ class NinePlusApp : Application() {
         pushManager = PushManager(this, repository)
         createNotificationChannels()
         com.example.ninebotplus.location.DashboardRefreshWorker.schedule(this)
+        // MapLibre must be initialized before any MapView is created.
+        initMapLibre()
+    }
+
+    private fun initMapLibre() {
+        try {
+            // Open-source MapLibre GL: no API key required for the engine.
+            // Tile style URI is configured per map screen (see VehicleLocationMap).
+            org.maplibre.android.MapLibre.getInstance(applicationContext)
+        } catch (_: Exception) {
+            // Already initialized or unavailable; map screens show fallback UI.
+        }
     }
 
     private fun createNotificationChannels() {

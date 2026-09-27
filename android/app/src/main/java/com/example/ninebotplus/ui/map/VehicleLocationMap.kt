@@ -28,6 +28,7 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
@@ -79,7 +80,18 @@ fun VehicleLocationMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
-                map.setStyle(Style.getPredefinedStyle("streets")) {
+                map.setStyle(Style.getPredefinedStyle("streets")) { style ->
+                    // Real geo-bound marker via GeoJSON point source + circle layer.
+                    val point = Point.fromLngLat(gcj.longitude, gcj.latitude)
+                    style.addSource(GeoJsonSource("vehicle-point", Feature.fromGeometry(point)))
+                    style.addLayer(
+                        CircleLayer("vehicle-marker", "vehicle-point").withProperties(
+                            PropertyFactory.circleColor("#21D147"),
+                            PropertyFactory.circleRadius(10f),
+                            PropertyFactory.circleStrokeWidth(2f),
+                            PropertyFactory.circleStrokeColor("#FFFFFF"),
+                        ),
+                    )
                     map.cameraPosition = CameraPosition.Builder()
                         .target(LatLng(gcj.latitude, gcj.longitude))
                         .zoom(15.5)
@@ -87,19 +99,11 @@ fun VehicleLocationMap(
                 }
             }
         }
-        // Simple Compose marker overlay — avoids annotation-plugin dependency.
         Column(
             Modifier
-                .align(Alignment.Center)
-                .padding(bottom = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .align(Alignment.BottomCenter)
+                .padding(8.dp),
         ) {
-            Box(
-                Modifier
-                    .height(12.dp)
-                    .background(TeslaGreen, RoundedCornerShape(50))
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
-            )
             Text(
                 title,
                 fontSize = 11.sp,
@@ -155,12 +159,33 @@ fun RideTrackMap(
                     val lineString = LineString.fromLngLats(
                         gcjPoints.map { Point.fromLngLat(it.longitude, it.latitude) },
                     )
-                    val feature = Feature.fromGeometry(lineString)
-                    style.addSource(GeoJsonSource("ride-track", FeatureCollection.fromFeature(feature)))
+                    style.addSource(GeoJsonSource("ride-track", FeatureCollection.fromFeature(Feature.fromGeometry(lineString))))
                     style.addLayer(
                         LineLayer("ride-track-layer", "ride-track").withProperties(
                             PropertyFactory.lineColor("#21D147"),
                             PropertyFactory.lineWidth(5f),
+                        ),
+                    )
+
+                    // Real geo-bound start/end markers.
+                    val startPoint = Point.fromLngLat(gcjPoints.first().longitude, gcjPoints.first().latitude)
+                    val endPoint = Point.fromLngLat(gcjPoints.last().longitude, gcjPoints.last().latitude)
+                    style.addSource(GeoJsonSource("ride-start", Feature.fromGeometry(startPoint)))
+                    style.addSource(GeoJsonSource("ride-end", Feature.fromGeometry(endPoint)))
+                    style.addLayer(
+                        CircleLayer("ride-start-layer", "ride-start").withProperties(
+                            PropertyFactory.circleColor("#21D147"),
+                            PropertyFactory.circleRadius(8f),
+                            PropertyFactory.circleStrokeWidth(2f),
+                            PropertyFactory.circleStrokeColor("#FFFFFF"),
+                        ),
+                    )
+                    style.addLayer(
+                        CircleLayer("ride-end-layer", "ride-end").withProperties(
+                            PropertyFactory.circleColor("#FF453A"),
+                            PropertyFactory.circleRadius(8f),
+                            PropertyFactory.circleStrokeWidth(2f),
+                            PropertyFactory.circleStrokeColor("#FFFFFF"),
                         ),
                     )
 

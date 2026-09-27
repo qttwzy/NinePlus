@@ -321,7 +321,8 @@ data class RecordedRide(
         }
 
     val mapPoints: List<CoordinateTransform.LatLng>
-        get() = validPoints.map { CoordinateTransform.gcj02(it.latitude, it.longitude) }
+        // Raw WGS-84. The map layer is the single owner of the GCJ-02 transform.
+        get() = validPoints.map { CoordinateTransform.LatLng(it.latitude, it.longitude) }
 
     companion object {
         fun recalculatedDistanceMeters(points: List<RideTrackPoint>): Double {
