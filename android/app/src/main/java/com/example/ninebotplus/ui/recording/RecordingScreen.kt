@@ -84,6 +84,15 @@ fun RecordingScreen(viewModel: AppViewModel) {
         Manifest.permission.ACCESS_FINE_LOCATION,
     ) == PackageManager.PERMISSION_GRANTED
 
+    // GPS preview must stop when leaving this screen and not recording.
+    androidx.compose.runtime.DisposableEffect(recorder) {
+        onDispose {
+            if (!recorder.session.value.isRecording) {
+                recorder.stopPreview()
+            }
+        }
+    }
+
     selectedRide?.let { ride ->
         RecordedRideDetail(ride = ride, onDismiss = { selectedRide = null }, onDelete = {
             deleteCandidate = ride
@@ -375,6 +384,13 @@ private fun RecordedRideDetail(ride: RecordedRide, onDismiss: () -> Unit, onDele
                 NumberFormats.distanceKm(ride.distanceKilometers, 2),
                 fontSize = 36.sp,
                 fontWeight = FontWeight.SemiBold,
+            )
+            // Real track map (polyline + start/end + fit bounds).
+            com.example.ninebotplus.ui.map.RideTrackMap(
+                points = ride.mapPoints,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 MetricCell("时长", NineplusDates.formatClockDuration(ride.durationSeconds))
