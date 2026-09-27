@@ -27,3 +27,18 @@ ninecli-source/
 .env
 .env.*
 !.env.example
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.jks
+*.keystore
+google-services.json
+
+# Kotlin / IDE scratch
+android/.kotlin/
