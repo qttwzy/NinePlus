@@ -77,8 +77,8 @@ export NINEPLUS_KEY_PASSWORD=...
 | 行程详情 | 🟡 | 字段展示完整 |
 | 服务器行程轨迹地图 | ❌ | Platform 无稳定 track contract，**未实现** |
 | 本地骑行记录 | 🟡 | G 值/恢复/职责分离已修 |
-| 本地轨迹地图 | 🟡 | 折线 + 真实起终点 + fit bounds |
-| 车辆位置地图 | 🟡 | MapLibre GeoJSON 标记 + 单次 GCJ-02 |
+| 本地轨迹地图 | 🟡 | 折线 + 起终点 + fit bounds |
+| 车辆位置地图 | 🟡 | MapLibre GeoJSON 标记；默认 WGS-84 底图不转换 |
 | Widget 刷新/寻车 | 🟡 | 安全边界已加固 |
 | Widget 危险操作 | ✅ | 不静默执行；一次性确认 Dialog（可关闭） |
 | 充电通知 | 🟡 | 本地驱动，不依赖 FCM |
@@ -88,6 +88,13 @@ export NINEPLUS_KEY_PASSWORD=...
 | 电池化学设置 UI | 🟠 | API 已通，完整设置面板待做 |
 
 图例：✅ 实现+测试 · 🟡 实现待真机验证 · 🟠 部分 · ❌ 未实现
+
+## 地图与坐标
+
+- Style URI 显式配置（MapLibre 11.x 无 `streets` predefined style）
+- 默认 MapLibre/OSM 底图使用 **WGS-84**，不做 GCJ-02 转换
+- 若换用国内 GCJ-02 瓦片，将 `MapProviderConfig.needsGcj02` 设为 `true`
+- 转换唯一入口：`MapProviderConfig.toMapCoordinate`
 
 ## 权限
 
