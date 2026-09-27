@@ -15,7 +15,12 @@ import com.example.ninebotplus.R
 
 /**
  * Foreground service that keeps ride recording alive while the app is backgrounded.
- * Uses FOREGROUND_SERVICE_LOCATION; no aggressive wake locks.
+ *
+ * Owns ONLY its own lifecycle. It never calls into Recorder methods that in turn
+ * call back into the Service (no stop() ↔ stop() recursion).
+ *
+ * Restore entry: [onStartCommand] checks ActiveRideStore and calls
+ * [RideRecorder.restoreActiveSession] — the single process-death recovery path.
  */
 class RideRecordingService : Service() {
 
@@ -29,12 +34,18 @@ class RideRecordingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                recorder.stop()
+                // Finalize data if still recording, then stop the service.
+                // finishRecording does NOT call back into this Service.
+                recorder.finishRecording()
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
+                // Single restore entry for process death / sticky restart.
+                if (!recorder.isRecording && recorder.hasActivePersistedSession()) {
+                    recorder.restoreActiveSession()
+                }
                 val notification = buildNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     ServiceCompat.startForeground(
@@ -46,6 +57,7 @@ class RideRecordingService : Service() {
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
+                // Ensure GPS is running whether we just restored or were already recording.
                 recorder.startPreview()
             }
         }
@@ -89,7 +101,8 @@ class RideRecordingService : Service() {
             }
         }
 
-        fun stop(context: Context) {
+        /** Ask the service to finalize + stop. Idempotent. */
+        fun stopForegroundAndSelf(context: Context) {
             val intent = Intent(context, RideRecordingService::class.java).apply {
                 action = ACTION_STOP
             }

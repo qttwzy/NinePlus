@@ -161,12 +161,16 @@ fun RecordingScreen(viewModel: AppViewModel) {
                         return@Button
                     }
                     if (session.isRecording) {
-                        val ride = recorder.stop(
+                        // Separate responsibilities: finalize data, then stop service.
+                        val ride = recorder.finishRecording(
                             vehicleSn = dashboard.primaryVehicle?.vehicle?.sn,
                         )
+                        com.example.ninebotplus.location.RideRecordingService
+                            .stopForegroundAndSelf(context)
                         if (ride != null) viewModel.saveRecordedRide(ride)
                     } else {
                         recorder.start(vehicleSn = dashboard.primaryVehicle?.vehicle?.sn)
+                        com.example.ninebotplus.location.RideRecordingService.start(context)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(

@@ -31,16 +31,16 @@ data class RecordingSessionState(
 /**
  * Local ride recorder.
  *
- * Lifecycle states:
- * - STOPPED: no GPS listener registered
- * - PREVIEWING: listener registered while the Recording screen is visible
- * - RECORDING: listener registered + foreground service running
+ * Lifecycle:
+ * - STOPPED: no GPS listener
+ * - PREVIEWING: listener while Recording screen visible
+ * - RECORDING: listener + foreground service
  *
- * GPS is never left permanently registered. [stopPreview] is required when the
- * screen leaves and a ride is not in progress.
- *
- * Sample math lives in [RideMath] (unit-tested). Process-death recovery uses
- * [ActiveRideStore] checkpoints.
+ * Responsibility split (no recursion):
+ * - [finishRecording] only finalizes ride data + GPS + ActiveRideStore.
+ *   It does NOT start/stop the Service.
+ * - [RideRecordingService] owns its own foreground lifecycle and calls
+ *   finishRecording / restore as needed, then stopSelf.
  */
 class RideRecorder private constructor(
     private val context: Context,
@@ -61,6 +61,12 @@ class RideRecorder private constructor(
     /** Speed BEFORE the current sample was applied. Used for G calculation. */
     private var previousSpeedKmh = 0.0
 
+    /** Incremental distance so we never rescan the whole track per sample. */
+    private var incrementalDistanceMeters = 0.0
+
+    /** How many points are already checkpointed to disk. */
+    private var persistedPointCount = 0
+
     private var lastSampleAt = 0L
     private var previewing = false
     private var recording = false
@@ -78,6 +84,8 @@ class RideRecorder private constructor(
             previewing -> State.PREVIEWING
             else -> State.STOPPED
         }
+
+    val isRecording: Boolean get() = recording
 
     fun startPreview() {
         if (recording) return
@@ -99,6 +107,7 @@ class RideRecorder private constructor(
     }
 
     fun start(vehicleSn: String?) {
+        if (recording) return
         if (!hasLocationPermission()) {
             _session.value = _session.value.copy(gpsQuality = "需要定位权限")
             return
@@ -108,6 +117,8 @@ class RideRecorder private constructor(
         points.clear()
         previousLocation = null
         previousSpeedKmh = 0.0
+        incrementalDistanceMeters = 0.0
+        persistedPointCount = 0
         lastSampleAt = 0L
         recording = true
         previewing = true
@@ -118,18 +129,25 @@ class RideRecorder private constructor(
         )
         registerListener()
         activeStore.beginSession(vehicleSn)
-        RideRecordingService.start(context)
     }
 
-    fun stop(vehicleSn: String? = null): RecordedRide? {
+    /**
+     * Finalize ride data. Idempotent: a second call returns null and does not
+     * re-clear the store. Does NOT touch the Service lifecycle.
+     */
+    fun finishRecording(vehicleSn: String? = null): RecordedRide? {
+        if (!recording && startedAt == null) return null
+
         val started = startedAt
         recording = false
-        RideRecordingService.stop(context)
 
         if (started == null) {
+            // Defensive: inconsistent state; clean up without producing a ride.
             previewing = false
             unregisterListener()
             activeStore.clear()
+            persistedPointCount = 0
+            incrementalDistanceMeters = 0.0
             _session.value = RecordingSessionState(isRecording = false, gpsQuality = "等待 GPS")
             return null
         }
@@ -137,8 +155,9 @@ class RideRecorder private constructor(
         val ended = Date()
         val state = _session.value
         val snapshot = points.toList()
-        val distance = RecordedRide.recalculatedDistanceMeters(snapshot)
-            .takeIf { it > 0 } ?: state.distanceMeters
+        val distance = incrementalDistanceMeters.takeIf { it > 0 }
+            ?: RecordedRide.recalculatedDistanceMeters(snapshot).takeIf { it > 0 }
+            ?: state.distanceMeters
         val durationSeconds = maxOf((ended.time - started.time) / 1000.0, 0.0)
         val averageSpeed = if (durationSeconds > 0) {
             (distance / durationSeconds) * 3.6
@@ -164,6 +183,8 @@ class RideRecorder private constructor(
         startedAt = null
         previousLocation = null
         previousSpeedKmh = 0.0
+        incrementalDistanceMeters = 0.0
+        persistedPointCount = 0
         previewing = false
         unregisterListener()
         _session.value = RecordingSessionState(isRecording = false, gpsQuality = "等待 GPS")
@@ -172,23 +193,33 @@ class RideRecorder private constructor(
 
     fun currentPoints(): List<RideTrackPoint> = points.toList()
 
-    /** Restore an in-progress session after process death. */
+    /**
+     * Restore an in-progress session after process death.
+     * Called from RideRecordingService.onStartCommand — the single restore entry.
+     * Returns true when a recording session was restored.
+     */
     fun restoreActiveSession(): Boolean {
+        if (recording) return true
         val persisted = activeStore.loadSession() ?: return false
+
         vehicleSn = persisted.vehicleSn
         startedAt = persisted.startedAt
         points.clear()
         points.addAll(persisted.points)
         previousSpeedKmh = points.lastOrNull()?.speedKmh ?: 0.0
+        incrementalDistanceMeters = RecordedRide.recalculatedDistanceMeters(persisted.points)
+        persistedPointCount = points.size
+        lastSampleAt = points.lastOrNull()?.date?.time ?: 0L
         recording = true
         previewing = true
+
         _session.value = RecordingSessionState(
             isRecording = true,
             startedAt = startedAt,
             speedKmh = previousSpeedKmh,
-            maxSpeedKmh = persisted.points.maxOfOrNull { it.speedKmh } ?: 0.0,
-            maxAccelerationG = persisted.points.maxOfOrNull { it.accelerationG } ?: 0.0,
-            distanceMeters = RecordedRide.recalculatedDistanceMeters(persisted.points),
+            maxSpeedKmh = points.maxOfOrNull { it.speedKmh } ?: 0.0,
+            maxAccelerationG = points.maxOfOrNull { it.accelerationG } ?: 0.0,
+            distanceMeters = incrementalDistanceMeters,
             durationSeconds = maxOf(
                 (System.currentTimeMillis() - persisted.startedAt.time) / 1000.0,
                 0.0,
@@ -221,7 +252,6 @@ class RideRecorder private constructor(
         val rawSpeed = (systemSpeed ?: derivedSpeed ?: previousSpeedKmh)
             .coerceIn(0.0, RideMath.MAX_SPEED_KMH)
 
-        // Capture speed BEFORE overwrite — required for a non-zero acceleration.
         val speedBefore = previousSpeedKmh
         val smoothedSpeed = RideMath.smoothSpeed(speedBefore, rawSpeed)
 
@@ -245,9 +275,14 @@ class RideRecorder private constructor(
                 horizontalAccuracy = location.accuracy.toDouble(),
             )
             points += point
-            // Checkpoint every 12 points (~ one per 12s at 1Hz) to limit IO.
-            if (points.size % 12 == 0) {
-                activeStore.checkpoint(points)
+            // Incremental distance: only previous ↔ current segment.
+            if (points.size >= 2 && distanceDelta > 0) {
+                incrementalDistanceMeters += distanceDelta
+            }
+            // Checkpoint only new points (O(1) append, no full rewrite).
+            if (points.size - persistedPointCount >= CHECKPOINT_INTERVAL) {
+                activeStore.appendPoints(points.drop(persistedPointCount))
+                persistedPointCount = points.size
             }
         }
 
@@ -257,25 +292,20 @@ class RideRecorder private constructor(
         val duration = state.startedAt?.let {
             (now - it.time) / 1000.0
         } ?: 0.0
-        val totalDistance = if (recording) {
-            RecordedRide.recalculatedDistanceMeters(points)
-                .takeIf { it > 0 } ?: (state.distanceMeters + distanceDelta)
-        } else {
-            0.0
-        }
 
         _session.value = state.copy(
             speedKmh = smoothedSpeed,
             maxSpeedKmh = maxOf(state.maxSpeedKmh, smoothedSpeed),
             accelerationG = g,
             maxAccelerationG = maxOf(state.maxAccelerationG, g),
-            distanceMeters = totalDistance,
+            distanceMeters = incrementalDistanceMeters,
             durationSeconds = duration,
             pointCount = points.size,
             gpsQuality = if (location.accuracy < 20f) "GPS 稳定" else "GPS 弱",
         )
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun registerListener() {
         if (listenerRegistered) return
         if (!hasLocationPermission()) return
@@ -307,6 +337,8 @@ class RideRecorder private constructor(
             ) == PackageManager.PERMISSION_GRANTED
 
     companion object {
+        private const val CHECKPOINT_INTERVAL = 12
+
         @Volatile
         private var instance: RideRecorder? = null
 

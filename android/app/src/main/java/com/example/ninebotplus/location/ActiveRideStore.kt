@@ -48,10 +48,13 @@ class ActiveRideStore(private val context: Context) {
     }
 
     fun checkpoint(points: List<RideTrackPoint>) {
-        // Append-only: write only points not yet persisted.
-        val already = countPersistedPoints()
-        if (points.size <= already) return
-        val payload = points.drop(already).joinToString("\n") { point ->
+        appendPoints(points)
+    }
+
+    /** Append only the given points (no full rewrite). */
+    fun appendPoints(points: List<RideTrackPoint>) {
+        if (points.isEmpty()) return
+        val payload = points.joinToString("\n") { point ->
             val p = TrackPointPayload(
                 id = point.id,
                 date = point.date.time,
