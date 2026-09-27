@@ -10,7 +10,6 @@ import com.example.ninebotplus.domain.Dashboard
 import com.example.ninebotplus.domain.DiagnosticsSnapshot
 import com.example.ninebotplus.domain.LoginResult
 import com.example.ninebotplus.domain.RecordedRide
-import com.example.ninebotplus.domain.RefreshEvent
 import com.example.ninebotplus.domain.ResolvedAddress
 import com.example.ninebotplus.domain.RideDetail
 import com.example.ninebotplus.domain.RideRecord
@@ -18,15 +17,13 @@ import com.example.ninebotplus.domain.ServerConfiguration
 import com.example.ninebotplus.domain.VehicleAction
 import com.example.ninebotplus.domain.VehicleHistoryPoint
 import com.example.ninebotplus.domain.VehicleSnapshot
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
-data class UiMessage(
-    val text: String,
-    val isError: Boolean,
-)
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class AppUiState(
     val isLoading: Boolean = false,
@@ -38,6 +35,16 @@ data class AppUiState(
     val syncingMonth: String? = null,
 )
 
+/**
+ * Central UI state holder.
+ *
+ * Concurrency rules (regression-protected):
+ * - [runOperation] is a `suspend` function, not a nested `launch`. Callers
+ *   set/restore UI flags around a single await, so `activeAction` and
+ *   `syncingMonth` cannot be cleared before the work finishes.
+ * - A single [operationMutex] serializes user-triggered operations so a double
+ *   tap cannot interleave two loading/error states.
+ */
 class AppViewModel(
     private val app: NinePlusApp,
     private val repository: VehicleRepository,
@@ -71,7 +78,9 @@ class AppViewModel(
     private val _interfaceRides = MutableStateFlow<Map<String, List<RideRecord>>>(emptyMap())
     val interfaceRides: StateFlow<Map<String, List<RideRecord>>> = _interfaceRides.asStateFlow()
 
+    private val operationMutex = Mutex()
     private var lastAutoRefreshAt = 0L
+    private var refreshJob: Job? = null
 
     fun initialize() {
         viewModelScope.launch {
@@ -105,7 +114,7 @@ class AppViewModel(
         viewModelScope.launch {
             runOperation("正在保存配置") {
                 val configuration = currentConfiguration()
-                if (!configuration.isUsable()) {
+                if (!configuration.isUsable) {
                     error("请先填写 NinePlus 服务器地址")
                 }
                 repository.saveConfiguration(configuration)
@@ -143,7 +152,9 @@ class AppViewModel(
     }
 
     fun refreshDashboard() {
-        viewModelScope.launch {
+        // Cancel any in-flight auto refresh so manual refresh wins.
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             runOperation("正在刷新车况") {
                 repository.refreshDashboard()
                 refreshLocalCaches()
@@ -166,30 +177,40 @@ class AppViewModel(
                 activeAction = action,
                 activeActionSn = sn,
             )
-            runOperation(action.loadingTitle) {
-                repository.performAction(action, sn)
-                refreshLocalCaches()
-                status(action.resultTitle)
-                app.pushManager.syncChargingNotification(repository.dashboard.value)
+            try {
+                runOperation(action.loadingTitle) {
+                    repository.performAction(action, sn)
+                    refreshLocalCaches()
+                    status(action.resultTitle)
+                    app.pushManager.syncChargingNotification(repository.dashboard.value)
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(activeAction = null, activeActionSn = null)
             }
-            _uiState.value = _uiState.value.copy(activeAction = null, activeActionSn = null)
         }
     }
 
     fun syncTravelMonth(vehicleSn: String, month: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(syncingMonth = month)
-            runOperation("正在获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 行程") {
-                repository.syncTravelMonth(vehicleSn, month)
-                refreshLocalCaches()
-                val records = _interfaceRides.value[vehicleSn].orEmpty()
-                if (records.isEmpty()) {
-                    status("${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 暂无行程")
-                } else {
-                    status("已获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} ${records.size} 条行程")
+            try {
+                runOperation(
+                    "正在获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 行程",
+                ) {
+                    repository.syncTravelMonth(vehicleSn, month)
+                    refreshLocalCaches()
+                    val records = _interfaceRides.value[vehicleSn].orEmpty()
+                    if (records.isEmpty()) {
+                        status("${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 暂无行程")
+                    } else {
+                        status(
+                            "已获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} ${records.size} 条行程",
+                        )
+                    }
                 }
+            } finally {
+                _uiState.value = _uiState.value.copy(syncingMonth = null)
             }
-            _uiState.value = _uiState.value.copy(syncingMonth = null)
         }
     }
 
@@ -223,12 +244,9 @@ class AppViewModel(
     fun enablePush() {
         viewModelScope.launch {
             runOperation("正在开启充电通知") {
-                app.pushManager.let { manager ->
-                    // Token is obtained via FCM service; register whatever is stored.
-                    repository.registerPushTokenToServer()
-                }
+                repository.registerPushTokenToServer()
                 if (repository.pushToken.value == null) {
-                    status("已请求通知权限，系统返回设备 Token 后会自动上报")
+                    status("请先在系统设置中允许通知，并确保已配置推送")
                 } else {
                     status("充电通知已开启")
                 }
@@ -268,9 +286,11 @@ class AppViewModel(
 
     fun logout() {
         viewModelScope.launch {
-            repository.logout()
-            _account.value = ""
-            status("已退出登录")
+            runOperation("正在退出") {
+                repository.logout()
+                _account.value = ""
+                status("已退出登录")
+            }
         }
     }
 
@@ -283,6 +303,10 @@ class AppViewModel(
     fun resolvedAddressText(snapshot: VehicleSnapshot): String? =
         repository.resolvedAddress(snapshot.vehicle.sn)
 
+    /**
+     * Effective request configuration. Session comes from LoginResult via
+     * [com.example.ninebotplus.data.AuthAssembler] inside the repository.
+     */
     private fun currentConfiguration() = ServerConfiguration(
         baseUrlString = _baseBaseUrl.value,
         bearerToken = _bearerToken.value,
@@ -304,7 +328,7 @@ class AppViewModel(
 
     private fun autoRefreshIfPossible() {
         val configuration = currentConfiguration()
-        if (!configuration.isUsable()) return
+        if (!configuration.isUsable) return
         val now = System.currentTimeMillis()
         if (now - lastAutoRefreshAt < 8_000) return
         lastAutoRefreshAt = now
@@ -315,8 +339,13 @@ class AppViewModel(
         _uiState.value = _uiState.value.copy(statusMessage = message, errorMessage = null)
     }
 
-    private fun runOperation(message: String, block: suspend () -> Unit) {
-        viewModelScope.launch {
+    /**
+     * Runs [block] as a single awaited unit. No nested `launch`, so callers can
+     * reliably set state before and clear it after via try/finally around this call.
+     * Operations are serialized to avoid interleaved loading/error states.
+     */
+    private suspend fun runOperation(message: String, block: suspend () -> Unit) {
+        operationMutex.withLock {
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
                 loadingMessage = message,
@@ -345,5 +374,3 @@ class AppViewModel(
         }
     }
 }
-
-private fun ServerConfiguration.isUsable(): Boolean = this.isUsable
