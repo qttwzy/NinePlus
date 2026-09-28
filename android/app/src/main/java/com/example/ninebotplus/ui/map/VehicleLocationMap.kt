@@ -1,11 +1,10 @@
 package com.example.ninebotplus.ui.map
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -37,9 +36,35 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
+private const val TAG = "NinePlusMap"
+
 /**
- * Vehicle location map (MapLibre, no annotation plugin required).
- * WGS-84 input is converted to GCJ-02 before display.
+ * Creates a MapView with correct Compose lifecycle.
+ * Style must be applied via [Style.Builder.fromJson] — `setStyle(String)` treats
+ * the argument as a URL and silently shows a blank map when given JSON.
+ */
+@Composable
+private fun rememberMapLibreView(): MapView {
+    val context = LocalContext.current.applicationContext
+    val mapView = remember {
+        MapView(context).apply {
+            onCreate(null)
+            onStart()
+            onResume()
+        }
+    }
+    DisposableEffect(mapView) {
+        onDispose {
+            mapView.onPause()
+            mapView.onStop()
+            mapView.onDestroy()
+        }
+    }
+    return mapView
+}
+
+/**
+ * Vehicle location map (MapLibre + AMap raster tiles, GCJ-02).
  */
 @Composable
 fun VehicleLocationMap(
@@ -58,21 +83,11 @@ fun VehicleLocationMap(
         return
     }
 
-    val context = LocalContext.current
     val gcj = remember(latitude, longitude) {
         MapProviderConfig.toMapCoordinate(latitude, longitude)
     }
-    val mapView = remember { MapView(context).apply { onCreate(null) } }
-
-    DisposableEffect(mapView) {
-        mapView.onStart()
-        mapView.onResume()
-        onDispose {
-            mapView.onPause()
-            mapView.onStop()
-            mapView.onDestroy()
-        }
-    }
+    val mapView = rememberMapLibreView()
+    val styleJson = MapProviderConfig.DEFAULT_STYLE_JSON
 
     Box(modifier = modifier) {
         AndroidView(
@@ -80,18 +95,21 @@ fun VehicleLocationMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
-                map.setStyle(MapProviderConfig.DEFAULT_STYLE_JSON) { style ->
-                    // Real geo-bound marker via GeoJSON point source + circle layer.
-                    val point = Point.fromLngLat(gcj.longitude, gcj.latitude)
-                    style.addSource(GeoJsonSource("vehicle-point", Feature.fromGeometry(point)))
-                    style.addLayer(
-                        CircleLayer("vehicle-marker", "vehicle-point").withProperties(
-                            PropertyFactory.circleColor("#21D147"),
-                            PropertyFactory.circleRadius(10f),
-                            PropertyFactory.circleStrokeWidth(2f),
-                            PropertyFactory.circleStrokeColor("#FFFFFF"),
-                        ),
-                    )
+                map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
+                    Log.i(TAG, "vehicle map style loaded")
+                    val sourceId = "vehicle-point"
+                    if (style.getSource(sourceId) == null) {
+                        val point = Point.fromLngLat(gcj.longitude, gcj.latitude)
+                        style.addSource(GeoJsonSource(sourceId, Feature.fromGeometry(point)))
+                        style.addLayer(
+                            CircleLayer("vehicle-marker", sourceId).withProperties(
+                                PropertyFactory.circleColor("#21D147"),
+                                PropertyFactory.circleRadius(10f),
+                                PropertyFactory.circleStrokeWidth(2f),
+                                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                            ),
+                        )
+                    }
                     map.cameraPosition = CameraPosition.Builder()
                         .target(LatLng(gcj.latitude, gcj.longitude))
                         .zoom(15.5)
@@ -109,7 +127,10 @@ fun VehicleLocationMap(
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        RoundedCornerShape(6.dp),
+                    )
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -117,7 +138,8 @@ fun VehicleLocationMap(
 }
 
 /**
- * Recorded-ride track map: polyline via GeoJsonSource + fit bounds + labels.
+ * Ride track map: polyline + start/end markers + fit bounds.
+ * Input coordinates are raw WGS-84; transform happens here once (GCJ-02 for AMap).
  */
 @Composable
 fun RideTrackMap(
@@ -133,21 +155,11 @@ fun RideTrackMap(
         return
     }
 
-    val context = LocalContext.current
     val gcjPoints = remember(points) {
         points.map { MapProviderConfig.toMapCoordinate(it.latitude, it.longitude) }
     }
-    val mapView = remember { MapView(context).apply { onCreate(null) } }
-
-    DisposableEffect(mapView) {
-        mapView.onStart()
-        mapView.onResume()
-        onDispose {
-            mapView.onPause()
-            mapView.onStop()
-            mapView.onDestroy()
-        }
-    }
+    val mapView = rememberMapLibreView()
+    val styleJson = MapProviderConfig.DEFAULT_STYLE_JSON
 
     Box(modifier = modifier) {
         AndroidView(
@@ -155,39 +167,43 @@ fun RideTrackMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
-                map.setStyle(MapProviderConfig.DEFAULT_STYLE_JSON) { style ->
+                map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
+                    Log.i(TAG, "ride track map style loaded")
                     val lineString = LineString.fromLngLats(
                         gcjPoints.map { Point.fromLngLat(it.longitude, it.latitude) },
                     )
-                    style.addSource(GeoJsonSource("ride-track", FeatureCollection.fromFeature(Feature.fromGeometry(lineString))))
-                    style.addLayer(
-                        LineLayer("ride-track-layer", "ride-track").withProperties(
-                            PropertyFactory.lineColor("#21D147"),
-                            PropertyFactory.lineWidth(5f),
-                        ),
-                    )
+                    if (style.getSource("ride-track") == null) {
+                        style.addSource(
+                            GeoJsonSource("ride-track", FeatureCollection.fromFeature(Feature.fromGeometry(lineString))),
+                        )
+                        style.addLayer(
+                            LineLayer("ride-track-layer", "ride-track").withProperties(
+                                PropertyFactory.lineColor("#21D147"),
+                                PropertyFactory.lineWidth(5f),
+                            ),
+                        )
 
-                    // Real geo-bound start/end markers.
-                    val startPoint = Point.fromLngLat(gcjPoints.first().longitude, gcjPoints.first().latitude)
-                    val endPoint = Point.fromLngLat(gcjPoints.last().longitude, gcjPoints.last().latitude)
-                    style.addSource(GeoJsonSource("ride-start", Feature.fromGeometry(startPoint)))
-                    style.addSource(GeoJsonSource("ride-end", Feature.fromGeometry(endPoint)))
-                    style.addLayer(
-                        CircleLayer("ride-start-layer", "ride-start").withProperties(
-                            PropertyFactory.circleColor("#21D147"),
-                            PropertyFactory.circleRadius(8f),
-                            PropertyFactory.circleStrokeWidth(2f),
-                            PropertyFactory.circleStrokeColor("#FFFFFF"),
-                        ),
-                    )
-                    style.addLayer(
-                        CircleLayer("ride-end-layer", "ride-end").withProperties(
-                            PropertyFactory.circleColor("#FF453A"),
-                            PropertyFactory.circleRadius(8f),
-                            PropertyFactory.circleStrokeWidth(2f),
-                            PropertyFactory.circleStrokeColor("#FFFFFF"),
-                        ),
-                    )
+                        val startPoint = Point.fromLngLat(gcjPoints.first().longitude, gcjPoints.first().latitude)
+                        val endPoint = Point.fromLngLat(gcjPoints.last().longitude, gcjPoints.last().latitude)
+                        style.addSource(GeoJsonSource("ride-start", Feature.fromGeometry(startPoint)))
+                        style.addSource(GeoJsonSource("ride-end", Feature.fromGeometry(endPoint)))
+                        style.addLayer(
+                            CircleLayer("ride-start-layer", "ride-start").withProperties(
+                                PropertyFactory.circleColor("#21D147"),
+                                PropertyFactory.circleRadius(8f),
+                                PropertyFactory.circleStrokeWidth(2f),
+                                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                            ),
+                        )
+                        style.addLayer(
+                            CircleLayer("ride-end-layer", "ride-end").withProperties(
+                                PropertyFactory.circleColor("#FF453A"),
+                                PropertyFactory.circleRadius(8f),
+                                PropertyFactory.circleStrokeWidth(2f),
+                                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                            ),
+                        )
+                    }
 
                     val latLngs = gcjPoints.map { LatLng(it.latitude, it.longitude) }
                     val bounds = LatLngBounds.Builder().includes(latLngs).build()
@@ -206,7 +222,10 @@ fun RideTrackMap(
                 fontSize = 10.sp,
                 color = TeslaGreen,
                 modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        RoundedCornerShape(4.dp),
+                    )
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -220,7 +239,10 @@ fun RideTrackMap(
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        RoundedCornerShape(4.dp),
+                    )
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
