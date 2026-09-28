@@ -38,6 +38,12 @@ import org.maplibre.geojson.Point
 
 private const val TAG = "NinePlusMap"
 
+/** Strip MapLibre branding; tiles are AMap so attribution is ours. */
+private fun org.maplibre.android.maps.MapLibreMap.applyChinaChrome() {
+    uiSettings.isLogoEnabled = false
+    uiSettings.isAttributionEnabled = false
+}
+
 /**
  * Creates a MapView with correct Compose lifecycle.
  * Style must be applied via [Style.Builder.fromJson] — `setStyle(String)` treats
@@ -95,6 +101,7 @@ fun VehicleLocationMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
+                map.applyChinaChrome()
                 map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
                     Log.i(TAG, "vehicle map style loaded")
                     val sourceId = "vehicle-point"
@@ -119,8 +126,25 @@ fun VehicleLocationMap(
         }
         Column(
             Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomStart)
                 .padding(8.dp),
+        ) {
+            Text(
+                "© 高德地图",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp),
         ) {
             Text(
                 title,
@@ -167,6 +191,7 @@ fun RideTrackMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
+                map.applyChinaChrome()
                 map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
                     Log.i(TAG, "ride track map style loaded")
                     val lineString = LineString.fromLngLats(
@@ -210,6 +235,24 @@ fun RideTrackMap(
                     map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80), 500)
                 }
             }
+        }
+
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp),
+        ) {
+            Text(
+                "© 高德地图",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
 
         Column(
