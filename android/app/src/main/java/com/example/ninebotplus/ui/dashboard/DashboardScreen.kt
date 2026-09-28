@@ -2,6 +2,7 @@ package com.example.ninebotplus.ui.dashboard
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -491,6 +492,8 @@ private fun LocationRideCards(
             Column(Modifier.padding(14.dp)) {
                 Text("车辆位置", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(Modifier.height(8.dp))
+                val lat = snapshot.state.latitude
+                val lon = snapshot.state.longitude
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -500,6 +503,18 @@ private fun LocationRideCards(
                 ) {
                     if (privacyEnabled) {
                         Text("位置已隐藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (lat != null && lon != null) {
+                        com.example.ninebotplus.ui.map.VehicleLocationMap(
+                            latitude = lat,
+                            longitude = lon,
+                            title = snapshot.vehicle.name,
+                            privacyEnabled = false,
+                            compact = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(88.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                        )
                     } else {
                         Icon(
                             Icons.Default.Place,

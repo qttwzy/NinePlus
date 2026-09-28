@@ -38,10 +38,19 @@ import org.maplibre.geojson.Point
 
 private const val TAG = "NinePlusMap"
 
-/** Strip MapLibre branding; tiles are AMap so attribution is ours. */
-private fun org.maplibre.android.maps.MapLibreMap.applyChinaChrome() {
+/**
+ * Strip MapLibre branding; tiles are AMap so attribution is ours.
+ * Also clamp camera zoom to tile coverage — layer maxzoom must not hide
+ * the raster (that paints a black canvas at high zoom).
+ */
+private fun org.maplibre.android.maps.MapLibreMap.applyChinaChrome(interactive: Boolean = true) {
     uiSettings.isLogoEnabled = false
     uiSettings.isAttributionEnabled = false
+    setMinZoomPreference(MapProviderConfig.MIN_ZOOM)
+    setMaxZoomPreference(MapProviderConfig.MAX_ZOOM)
+    if (!interactive) {
+        uiSettings.setAllGesturesEnabled(false)
+    }
 }
 
 /**
@@ -79,6 +88,7 @@ fun VehicleLocationMap(
     title: String,
     modifier: Modifier = Modifier,
     privacyEnabled: Boolean = false,
+    compact: Boolean = false,
 ) {
     if (privacyEnabled) {
         Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -101,7 +111,7 @@ fun VehicleLocationMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
-                map.applyChinaChrome()
+                map.applyChinaChrome(interactive = !compact)
                 map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
                     Log.i(TAG, "vehicle map style loaded")
                     val sourceId = "vehicle-point"
@@ -111,7 +121,7 @@ fun VehicleLocationMap(
                         style.addLayer(
                             CircleLayer("vehicle-marker", sourceId).withProperties(
                                 PropertyFactory.circleColor("#21D147"),
-                                PropertyFactory.circleRadius(10f),
+                                PropertyFactory.circleRadius(if (compact) 7f else 10f),
                                 PropertyFactory.circleStrokeWidth(2f),
                                 PropertyFactory.circleStrokeColor("#FFFFFF"),
                             ),
@@ -119,7 +129,7 @@ fun VehicleLocationMap(
                     }
                     map.cameraPosition = CameraPosition.Builder()
                         .target(LatLng(gcj.latitude, gcj.longitude))
-                        .zoom(15.5)
+                        .zoom(if (compact) 15.0 else 15.5)
                         .build()
                 }
             }
@@ -127,11 +137,11 @@ fun VehicleLocationMap(
         Column(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(8.dp),
+                .padding(if (compact) 4.dp else 8.dp),
         ) {
             Text(
                 "© 高德地图",
-                fontSize = 10.sp,
+                fontSize = if (compact) 8.sp else 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .background(
@@ -141,22 +151,24 @@ fun VehicleLocationMap(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 8.dp),
-        ) {
-            Text(
-                title,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                        RoundedCornerShape(6.dp),
-                    )
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+        if (!compact) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp),
+            ) {
+                Text(
+                    title,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                            RoundedCornerShape(6.dp),
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
         }
     }
 }
