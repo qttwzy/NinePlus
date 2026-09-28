@@ -38,10 +38,16 @@ import org.maplibre.geojson.Point
 
 private const val TAG = "NinePlusMap"
 
-/** Strip MapLibre branding; tiles are AMap so attribution is ours. */
+/**
+ * Strip MapLibre branding; tiles are AMap so attribution is ours.
+ * Also clamp camera zoom to tile coverage — layer maxzoom must not hide
+ * the raster (that paints a black canvas at high zoom).
+ */
 private fun org.maplibre.android.maps.MapLibreMap.applyChinaChrome() {
     uiSettings.isLogoEnabled = false
     uiSettings.isAttributionEnabled = false
+    setMinZoomPreference(MapProviderConfig.MIN_ZOOM)
+    setMaxZoomPreference(MapProviderConfig.MAX_ZOOM)
 }
 
 /**

@@ -29,20 +29,36 @@ object MapProviderConfig {
                 "https://wprd04.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1&style=7"
               ],
               "tileSize": 256,
+              "maxzoom": 18,
               "attribution": "© AutoNavi"
             }
           },
           "layers": [
             {
+              "id": "background",
+              "type": "background",
+              "paint": {
+                "background-color": "#E8E4D8"
+              }
+            },
+            {
               "id": "amap",
               "type": "raster",
               "source": "amap",
               "minzoom": 3,
-              "maxzoom": 18
+              "maxzoom": 22
             }
           ]
         }
     """.trimIndent()
+
+    /** Tile source serves up to z=18; beyond that MapLibre overzooms. */
+    const val TILE_MAX_ZOOM: Double = 18.0
+
+    /** Camera ceiling — keep users inside overzoom, never past blank tiles. */
+    const val MAX_ZOOM: Double = 18.0
+
+    const val MIN_ZOOM: Double = 3.0
 
     /** AMap tiles are GCJ-02. */
     const val needsGcj02: Boolean = true
