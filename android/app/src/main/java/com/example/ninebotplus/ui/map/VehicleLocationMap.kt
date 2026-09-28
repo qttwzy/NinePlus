@@ -57,12 +57,23 @@ private fun org.maplibre.android.maps.MapLibreMap.applyChinaChrome(interactive: 
  * Creates a MapView with correct Compose lifecycle.
  * Style must be applied via [Style.Builder.fromJson] — `setStyle(String)` treats
  * the argument as a URL and silently shows a blank map when given JSON.
+ *
+ * [passThroughTouch] makes the view ignore motion events so a parent Compose
+ * clickable still fires (MapView otherwise swallows clicks even with gestures off).
  */
 @Composable
-private fun rememberMapLibreView(): MapView {
+private fun rememberMapLibreView(passThroughTouch: Boolean = false): MapView {
     val context = LocalContext.current.applicationContext
-    val mapView = remember {
-        MapView(context).apply {
+    val mapView = remember(passThroughTouch) {
+        object : MapView(context) {
+            override fun onTouchEvent(event: android.view.MotionEvent?): Boolean {
+                return if (passThroughTouch) false else super.onTouchEvent(event)
+            }
+
+            override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
+                return if (passThroughTouch) false else super.dispatchTouchEvent(ev)
+            }
+        }.apply {
             onCreate(null)
             onStart()
             onResume()
@@ -102,7 +113,7 @@ fun VehicleLocationMap(
     val gcj = remember(latitude, longitude) {
         MapProviderConfig.toMapCoordinate(latitude, longitude)
     }
-    val mapView = rememberMapLibreView()
+    val mapView = rememberMapLibreView(passThroughTouch = compact)
     val styleJson = MapProviderConfig.DEFAULT_STYLE_JSON
 
     Box(modifier = modifier) {
