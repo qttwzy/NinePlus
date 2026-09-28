@@ -8,6 +8,7 @@ Ninebot-plus-plus（NPP）是九号开放生态客户端与工具链：以 NineP
 - 不要把 token、session、密码、设备密钥写进 git、文档、测试输出或对话。
 - 真实车辆数据、Platform 凭证与 ninecli 凭据只在本机 / 受控服务器使用，不进公开仓。
 - 改动前先读 `README.md` 与 `docs/android-architecture.md`；Android 构建与单测见 `android/README.md`。
+- **出一版 App 必须升版本号**：`android/app/build.gradle.kts` 的 `versionName`（语义化版本）与 `versionCode`（整数 +1）同批提交；只改其中一项视为未完成。
 
 ## Issue 驱动开发
 
