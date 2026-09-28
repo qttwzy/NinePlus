@@ -34,6 +34,7 @@ android/build/
 android/app/build/
 android/local.properties
 android/.idea/
+.idea/
 *.apk
 *.aab
 *.jks
