@@ -23,8 +23,8 @@ android {
         applicationId = "com.example.ninebotplus"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.2.0"
+        versionCode = 6
+        versionName = "1.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         // Injected into AndroidManifest meta-data for AMap Android Map SDK.
