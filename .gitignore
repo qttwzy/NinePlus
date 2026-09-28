@@ -27,3 +27,6 @@ ninecli-source/
 .env
 .env.*
 !.env.example
+
+# Handoff checkpoints (task-handoff skill)
+.handoff/
