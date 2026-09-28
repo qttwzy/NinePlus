@@ -10,9 +10,11 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 
-# MapLibre
--keep class org.maplibre.android.** { *; }
--dontwarn org.maplibre.android.**
+# AMap Android Map SDK
+-keep class com.amap.api.** { *; }
+-keep class com.autonavi.** { *; }
+-dontwarn com.amap.api.**
+-dontwarn com.autonavi.**
 
 # Room
 -keep class * extends androidx.room.RoomDatabase

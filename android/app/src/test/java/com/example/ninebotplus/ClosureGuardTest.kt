@@ -15,12 +15,12 @@ import org.junit.Test
 class ClosureGuardTest {
 
     @Test
-    fun `map style is inline amap json for china`() {
-        val style = MapProviderConfig.DEFAULT_STYLE_JSON
-        assertThat(style).contains("autonavi")
-        assertThat(style).contains("raster")
-        // AMap tiles are GCJ-02 — transform must be enabled.
+    fun `map provider is amap android sdk for china detail`() {
+        assertThat(MapProviderConfig.PROVIDER).isEqualTo("amap-android-sdk")
+        // AMap SDK is GCJ-02 — transform must be enabled.
         assertThat(MapProviderConfig.needsGcj02).isTrue()
+        // Vector tiles go past free raster z=18.
+        assertThat(MapProviderConfig.MAX_ZOOM).isAtLeast(19.0)
     }
 
     @Test

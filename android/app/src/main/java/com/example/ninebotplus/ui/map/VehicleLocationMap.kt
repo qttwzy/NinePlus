@@ -1,6 +1,6 @@
 package com.example.ninebotplus.ui.map
 
-import android.util.Log
+import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,78 +19,67 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.TextureMapView
+import com.amap.api.maps.model.BitmapDescriptorFactory
+import com.amap.api.maps.model.LatLng
+import com.amap.api.maps.model.LatLngBounds
+import com.amap.api.maps.model.MarkerOptions
+import com.amap.api.maps.model.PolylineOptions
 import com.example.ninebotplus.ui.theme.TeslaGreen
 import com.example.ninebotplus.util.CoordinateTransform
-import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
-import org.maplibre.android.style.layers.CircleLayer
-import org.maplibre.android.style.layers.LineLayer
-import org.maplibre.android.style.layers.PropertyFactory
-import org.maplibre.android.style.sources.GeoJsonSource
-import org.maplibre.geojson.Feature
-import org.maplibre.geojson.FeatureCollection
-import org.maplibre.geojson.LineString
-import org.maplibre.geojson.Point
 
 private const val TAG = "NinePlusMap"
 
 /**
- * Strip MapLibre branding; tiles are AMap so attribution is ours.
- * Also clamp camera zoom to tile coverage — layer maxzoom must not hide
- * the raster (that paints a black canvas at high zoom).
- */
-private fun org.maplibre.android.maps.MapLibreMap.applyChinaChrome(interactive: Boolean = true) {
-    uiSettings.isLogoEnabled = false
-    uiSettings.isAttributionEnabled = false
-    setMinZoomPreference(MapProviderConfig.MIN_ZOOM)
-    setMaxZoomPreference(MapProviderConfig.MAX_ZOOM)
-    if (!interactive) {
-        uiSettings.setAllGesturesEnabled(false)
-    }
-}
-
-/**
- * Creates a MapView with correct Compose lifecycle.
- * Style must be applied via [Style.Builder.fromJson] — `setStyle(String)` treats
- * the argument as a URL and silently shows a blank map when given JSON.
+ * Creates an AMap TextureMapView with Compose lifecycle.
+ * TextureMapView avoids SurfaceView black-flash and plays better inside Compose.
  *
- * [passThroughTouch] makes the view ignore motion events so a parent Compose
- * clickable still fires (MapView otherwise swallows clicks even with gestures off).
+ * [passThroughTouch] lets parent Compose clickable receive taps (map view
+ * otherwise swallows them even when gestures are disabled).
  */
 @Composable
-private fun rememberMapLibreView(passThroughTouch: Boolean = false): MapView {
+private fun rememberAmapView(passThroughTouch: Boolean = false): TextureMapView {
     val context = LocalContext.current.applicationContext
     val mapView = remember(passThroughTouch) {
-        object : MapView(context) {
-            override fun onTouchEvent(event: android.view.MotionEvent?): Boolean {
+        object : TextureMapView(context) {
+            override fun onTouchEvent(event: MotionEvent?): Boolean {
                 return if (passThroughTouch) false else super.onTouchEvent(event)
             }
 
-            override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
+            override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
                 return if (passThroughTouch) false else super.dispatchTouchEvent(ev)
             }
         }.apply {
             onCreate(null)
-            onStart()
             onResume()
         }
     }
     DisposableEffect(mapView) {
         onDispose {
             mapView.onPause()
-            mapView.onStop()
             mapView.onDestroy()
         }
     }
     return mapView
 }
 
+private fun AMap.applyChinaChrome(interactive: Boolean = true) {
+    uiSettings.isZoomControlsEnabled = false
+    uiSettings.isCompassEnabled = false
+    uiSettings.isScaleControlsEnabled = false
+    uiSettings.isMyLocationButtonEnabled = false
+    setMinZoomLevel(MapProviderConfig.MIN_ZOOM.toFloat())
+    setMaxZoomLevel(MapProviderConfig.MAX_ZOOM.toFloat())
+    if (!interactive) {
+        uiSettings.setAllGesturesEnabled(false)
+    }
+}
+
 /**
- * Vehicle location map (MapLibre + AMap raster tiles, GCJ-02).
+ * Vehicle location map (高德官方 3D 地图 SDK).
+ * Coordinates are raw WGS-84; [MapProviderConfig.toMapCoordinate] converts to GCJ-02 once.
  */
 @Composable
 fun VehicleLocationMap(
@@ -113,37 +102,24 @@ fun VehicleLocationMap(
     val gcj = remember(latitude, longitude) {
         MapProviderConfig.toMapCoordinate(latitude, longitude)
     }
-    val mapView = rememberMapLibreView(passThroughTouch = compact)
-    val styleJson = MapProviderConfig.DEFAULT_STYLE_JSON
+    val mapView = rememberAmapView(passThroughTouch = compact)
 
     Box(modifier = modifier) {
         AndroidView(
             factory = { mapView },
             modifier = Modifier.fillMaxSize(),
         ) { view ->
-            view.getMapAsync { map ->
-                map.applyChinaChrome(interactive = !compact)
-                map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
-                    Log.i(TAG, "vehicle map style loaded")
-                    val sourceId = "vehicle-point"
-                    if (style.getSource(sourceId) == null) {
-                        val point = Point.fromLngLat(gcj.longitude, gcj.latitude)
-                        style.addSource(GeoJsonSource(sourceId, Feature.fromGeometry(point)))
-                        style.addLayer(
-                            CircleLayer("vehicle-marker", sourceId).withProperties(
-                                PropertyFactory.circleColor("#21D147"),
-                                PropertyFactory.circleRadius(if (compact) 7f else 10f),
-                                PropertyFactory.circleStrokeWidth(2f),
-                                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                            ),
-                        )
-                    }
-                    map.cameraPosition = CameraPosition.Builder()
-                        .target(LatLng(gcj.latitude, gcj.longitude))
-                        .zoom(if (compact) 15.0 else 15.5)
-                        .build()
-                }
-            }
+            val amap = view.map ?: return@AndroidView
+            amap.applyChinaChrome(interactive = !compact)
+            amap.clear()
+            val target = LatLng(gcj.latitude, gcj.longitude)
+            amap.addMarker(
+                MarkerOptions()
+                    .position(target)
+                    .anchor(0.5f, 0.5f)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)),
+            )
+            amap.moveCamera(CameraUpdateFactory.newLatLngZoom(target, if (compact) 15f else 15.5f))
         }
         Column(
             Modifier
@@ -205,59 +181,41 @@ fun RideTrackMap(
     val gcjPoints = remember(points) {
         points.map { MapProviderConfig.toMapCoordinate(it.latitude, it.longitude) }
     }
-    val mapView = rememberMapLibreView()
-    val styleJson = MapProviderConfig.DEFAULT_STYLE_JSON
+    val mapView = rememberAmapView()
 
     Box(modifier = modifier) {
         AndroidView(
             factory = { mapView },
             modifier = Modifier.fillMaxSize(),
         ) { view ->
-            view.getMapAsync { map ->
-                map.applyChinaChrome()
-                map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
-                    Log.i(TAG, "ride track map style loaded")
-                    val lineString = LineString.fromLngLats(
-                        gcjPoints.map { Point.fromLngLat(it.longitude, it.latitude) },
-                    )
-                    if (style.getSource("ride-track") == null) {
-                        style.addSource(
-                            GeoJsonSource("ride-track", FeatureCollection.fromFeature(Feature.fromGeometry(lineString))),
-                        )
-                        style.addLayer(
-                            LineLayer("ride-track-layer", "ride-track").withProperties(
-                                PropertyFactory.lineColor("#21D147"),
-                                PropertyFactory.lineWidth(5f),
-                            ),
-                        )
+            val amap = view.map ?: return@AndroidView
+            amap.applyChinaChrome(interactive = true)
+            amap.clear()
 
-                        val startPoint = Point.fromLngLat(gcjPoints.first().longitude, gcjPoints.first().latitude)
-                        val endPoint = Point.fromLngLat(gcjPoints.last().longitude, gcjPoints.last().latitude)
-                        style.addSource(GeoJsonSource("ride-start", Feature.fromGeometry(startPoint)))
-                        style.addSource(GeoJsonSource("ride-end", Feature.fromGeometry(endPoint)))
-                        style.addLayer(
-                            CircleLayer("ride-start-layer", "ride-start").withProperties(
-                                PropertyFactory.circleColor("#21D147"),
-                                PropertyFactory.circleRadius(8f),
-                                PropertyFactory.circleStrokeWidth(2f),
-                                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                            ),
-                        )
-                        style.addLayer(
-                            CircleLayer("ride-end-layer", "ride-end").withProperties(
-                                PropertyFactory.circleColor("#FF453A"),
-                                PropertyFactory.circleRadius(8f),
-                                PropertyFactory.circleStrokeWidth(2f),
-                                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                            ),
-                        )
-                    }
+            val latLngs = gcjPoints.map { LatLng(it.latitude, it.longitude) }
+            amap.addPolyline(
+                PolylineOptions()
+                    .addAll(latLngs)
+                    .color(0xFF21D147.toInt())
+                    .width(10f),
+            )
+            amap.addMarker(
+                MarkerOptions()
+                    .position(latLngs.first())
+                    .title("开始")
+                    .anchor(0.5f, 0.5f)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)),
+            )
+            amap.addMarker(
+                MarkerOptions()
+                    .position(latLngs.last())
+                    .title("结束")
+                    .anchor(0.5f, 0.5f)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)),
+            )
 
-                    val latLngs = gcjPoints.map { LatLng(it.latitude, it.longitude) }
-                    val bounds = LatLngBounds.Builder().includes(latLngs).build()
-                    map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80), 500)
-                }
-            }
+            val bounds = LatLngBounds.Builder().apply { latLngs.forEach { include(it) } }.build()
+            amap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80))
         }
 
         Column(
