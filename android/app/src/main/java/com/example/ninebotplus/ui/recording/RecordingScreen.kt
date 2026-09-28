@@ -75,7 +75,9 @@ fun RecordingScreen(viewModel: AppViewModel) {
         val fine = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarse = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fine || coarse) {
-            recorder.startPreview()
+            // User tapped 开始记录 — continue into recording, not just preview.
+            recorder.start(vehicleSn = viewModel.dashboard.value.primaryVehicle?.vehicle?.sn)
+            com.example.ninebotplus.location.RideRecordingService.start(context)
         }
     }
 
@@ -169,8 +171,17 @@ fun RecordingScreen(viewModel: AppViewModel) {
                             .stopForegroundAndSelf(context)
                         if (ride != null) viewModel.saveRecordedRide(ride)
                     } else {
-                        recorder.start(vehicleSn = dashboard.primaryVehicle?.vehicle?.sn)
-                        com.example.ninebotplus.location.RideRecordingService.start(context)
+                        val started = runCatching {
+                            recorder.start(vehicleSn = dashboard.primaryVehicle?.vehicle?.sn)
+                            com.example.ninebotplus.location.RideRecordingService.start(context)
+                        }
+                        if (started.isFailure) {
+                            android.widget.Toast.makeText(
+                                context,
+                                started.exceptionOrNull()?.message ?: "无法开始记录，请检查定位权限",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     }
                 },
                 colors = ButtonDefaults.buttonColors(

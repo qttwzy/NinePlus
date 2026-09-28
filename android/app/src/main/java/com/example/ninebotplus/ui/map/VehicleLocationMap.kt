@@ -80,7 +80,7 @@ fun VehicleLocationMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
-                map.setStyle(MapProviderConfig.DEFAULT_STYLE_URI) { style ->
+                map.setStyle(MapProviderConfig.DEFAULT_STYLE_JSON) { style ->
                     // Real geo-bound marker via GeoJSON point source + circle layer.
                     val point = Point.fromLngLat(gcj.longitude, gcj.latitude)
                     style.addSource(GeoJsonSource("vehicle-point", Feature.fromGeometry(point)))
@@ -155,7 +155,7 @@ fun RideTrackMap(
             modifier = Modifier.fillMaxSize(),
         ) { view ->
             view.getMapAsync { map ->
-                map.setStyle(MapProviderConfig.DEFAULT_STYLE_URI) { style ->
+                map.setStyle(MapProviderConfig.DEFAULT_STYLE_JSON) { style ->
                     val lineString = LineString.fromLngLats(
                         gcjPoints.map { Point.fromLngLat(it.longitude, it.latitude) },
                     )

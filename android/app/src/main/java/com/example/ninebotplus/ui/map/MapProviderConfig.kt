@@ -5,26 +5,47 @@ package com.example.ninebotplus.ui.map
  *
  * Coordinate policy:
  * - The transform MUST match the tile provider's coordinate system.
- * - Default MapLibre / OSM / OpenFreeMap style tiles use WGS-84 (Web Mercator
- *   projection with lat/lng as-is). Do NOT apply GCJ-02 on top of them.
- * - GCJ-02 transform is only for providers whose tiles are in GCJ-02
- *   (e.g. AMap / 某些国内瓦片). Set [needsGcj02] = true for those.
- *
- * Style URI: MapLibre 11.x `Style.getPredefinedStyle("streets")` does not
- * exist for the default `WellKnownTileServer.MapLibre` configuration (it only
- * exposes "Basic"). We therefore use an explicit style URI.
+ * - Default is AMap (高德) raster tiles, which are **GCJ-02** and fast in mainland China.
+ * - If you switch to OSM / MapLibre demotiles (WGS-84), set [needsGcj02] = false.
  */
 object MapProviderConfig {
 
     /**
-     * Default public MapLibre demo style (WGS-84 / standard Web Mercator).
-     * For production mainland-China use, point this at a GCJ-02 tile style
-     * and set [needsGcj02] = true.
+     * Fast mainland-China basemap: AMap raster tiles via MapLibre style.
+     * No API key required for these tile URLs (as commonly used by web maps).
+     * Style is inlined so we do not depend on demotiles.maplibre.org.
      */
-    const val DEFAULT_STYLE_URI: String = "https://demotiles.maplibre.org/style.json"
+    val DEFAULT_STYLE_JSON: String = """
+        {
+          "version": 8,
+          "name": "AMap-CN",
+          "sources": {
+            "amap": {
+              "type": "raster",
+              "tiles": [
+                "https://wprd01.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1&style=7",
+                "https://wprd02.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1&style=7",
+                "https://wprd03.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1&style=7",
+                "https://wprd04.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1&style=7"
+              ],
+              "tileSize": 256,
+              "attribution": "© AutoNavi"
+            }
+          },
+          "layers": [
+            {
+              "id": "amap",
+              "type": "raster",
+              "source": "amap",
+              "minzoom": 3,
+              "maxzoom": 18
+            }
+          ]
+        }
+    """.trimIndent()
 
-    /** True only when the active tile provider uses GCJ-02 coordinates. */
-    const val needsGcj02: Boolean = false
+    /** AMap tiles are GCJ-02. */
+    const val needsGcj02: Boolean = true
 
     /**
      * Convert a raw WGS-84 vehicle/track point into map coordinates.

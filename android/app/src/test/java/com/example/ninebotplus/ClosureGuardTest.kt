@@ -15,30 +15,23 @@ import org.junit.Test
 class ClosureGuardTest {
 
     @Test
-    fun `map style uri is explicit url not predefined name`() {
-        val uri = MapProviderConfig.DEFAULT_STYLE_URI
-        assertThat(uri.startsWith("https://")).isTrue()
-        assertThat(uri).isNotEqualTo("streets")
-        assertThat(uri).isNotEqualTo("Basic")
+    fun `map style is inline amap json for china`() {
+        val style = MapProviderConfig.DEFAULT_STYLE_JSON
+        assertThat(style).contains("autonavi")
+        assertThat(style).contains("raster")
+        // AMap tiles are GCJ-02 — transform must be enabled.
+        assertThat(MapProviderConfig.needsGcj02).isTrue()
     }
 
     @Test
-    fun `default map provider uses wgs84 without gcj transform`() {
-        // MapLibre demotiles / OSM = WGS-84. needsGcj02 must be false.
-        assertThat(MapProviderConfig.needsGcj02).isFalse()
-
+    fun `map coordinate applies gcj for amap tiles`() {
         val wgsLat = 31.2304
         val wgsLon = 121.4737
         val mapPoint = MapProviderConfig.toMapCoordinate(wgsLat, wgsLon)
-        // No transform applied — marker lands on the correct tile coordinate.
-        assertThat(mapPoint.latitude).isWithin(1e-9).of(wgsLat)
-        assertThat(mapPoint.longitude).isWithin(1e-9).of(wgsLon)
-
-        // If someone flips needsGcj02 for a GCJ provider, the helper must transform.
-        // (We assert the helper's non-GCJ path only here; GCJ path is covered
-        // by CoordinateTransformTest.)
         val gcj = CoordinateTransform.gcj02(wgsLat, wgsLon)
-        assertThat(mapPoint.latitude).isNotEqualTo(gcj.latitude)
+        // Must match a single GCJ transform (AMap tile space).
+        assertThat(mapPoint.latitude).isWithin(1e-9).of(gcj.latitude)
+        assertThat(mapPoint.longitude).isWithin(1e-9).of(gcj.longitude)
     }
 
     @Test

@@ -407,11 +407,59 @@ private fun RideDetailDialog(
             if (detail != null) {
                 Spacer(Modifier.height(8.dp))
                 Text("接口轨迹", fontWeight = FontWeight.SemiBold)
-                Text(
-                    "详情已加载，轨迹点见下方原始字段。",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                val points = remember(detail) {
+                    com.example.ninebotplus.domain.ServerTrackParser.parsePoints(detail.raw)
+                }
+                if (points.isEmpty()) {
+                    Text(
+                        "行程详情已加载，但服务端未返回可用轨迹点。",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "${points.size} 个轨迹点 · 每点含速度",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // Real map: polyline + start/end, coordinates GCJ-02 once.
+                    com.example.ninebotplus.ui.map.RideTrackMap(
+                        points = points.map {
+                            com.example.ninebotplus.util.CoordinateTransform.LatLng(it.latitude, it.longitude)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                    )
+                    // Per-point speed list (compact).
+                    Text("轨迹点速度", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    points.take(200).forEach { pt ->
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(
+                                "#${pt.index + 1}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.width(36.dp),
+                            )
+                            Text(pt.speedText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.weight(1f))
+                            Text(pt.distanceText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "%.5f, %.5f".format(pt.latitude, pt.longitude),
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (points.size > 200) {
+                        Text(
+                            "仅显示前 200 点，共 ${points.size} 点",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
