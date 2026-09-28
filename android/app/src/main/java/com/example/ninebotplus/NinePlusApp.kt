@@ -48,17 +48,16 @@ class NinePlusApp : Application() {
         pushManager = PushManager(this, repository)
         createNotificationChannels()
         com.example.ninebotplus.location.DashboardRefreshWorker.schedule(this)
-        // MapLibre must be initialized before any MapView is created.
-        initMapLibre()
+        initAmapPrivacy()
     }
 
-    private fun initMapLibre() {
+    /** 高德 SDK 合规：必须在创建 MapView 前完成隐私同意。 */
+    private fun initAmapPrivacy() {
         try {
-            // Open-source MapLibre GL: no API key required for the engine.
-            // Tile style URI is configured per map screen (see VehicleLocationMap).
-            org.maplibre.android.MapLibre.getInstance(applicationContext)
+            com.amap.api.maps.MapsInitializer.updatePrivacyShow(this, true, true)
+            com.amap.api.maps.MapsInitializer.updatePrivacyAgree(this, true)
         } catch (_: Exception) {
-            // Already initialized or unavailable; map screens show fallback UI.
+            // Map screens show fallback UI if the SDK is unavailable.
         }
     }
 

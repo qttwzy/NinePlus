@@ -20,6 +20,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.NinePlus">
 
+        <!-- AMap Android Map SDK key; value injected from local.properties at build time. -->
+        <meta-data
+            android:name="com.amap.api.v2.apikey"
+            android:value="${amapKey}" />
+
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

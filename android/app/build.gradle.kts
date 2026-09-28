@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+// Secrets stay in android/local.properties (gitignored). Never hardcode keys.
+val localProperties = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val amapKey: String = localProperties.getProperty("amap.key")?.trim().orEmpty()
 
 android {
     namespace = "com.example.ninebotplus"
@@ -14,10 +23,13 @@ android {
         applicationId = "com.example.ninebotplus"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.1.2"
+        versionCode = 5
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        // Injected into AndroidManifest meta-data for AMap Android Map SDK.
+        manifestPlaceholders["amapKey"] = amapKey
+        buildConfigField("String", "AMAP_KEY", "\"$amapKey\"")
     }
 
     signingConfigs {
@@ -98,7 +110,7 @@ dependencies {
 
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.play.services.location)
-    implementation(libs.maplibre.android.sdk)
+    implementation(libs.amap.map3d)
     implementation(libs.coil.compose)
     implementation(libs.androidx.security.crypto)
     // Optional FCM: compiles without google-services.json; tokens arrive only
