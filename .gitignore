@@ -42,3 +42,6 @@ google-services.json
 
 # Kotlin / IDE scratch
 android/.kotlin/
+
+# Handoff checkpoints (task-handoff skill)
+.handoff/
