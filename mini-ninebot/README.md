@@ -2,9 +2,9 @@
 
 NineBot+ is a personal iOS app for viewing and managing Ninebot vehicle status, with Home Screen widgets, Lock Screen widgets, Siri Shortcuts, trip history, location views, and local ride recording.
 
-This project is intended for personal builds. It is not configured for App Store distribution by default.
+This project is intended for personal builds. It is not configured for App Store distribution by default. The iOS client is maintained alongside the Android client in this repository, and both use the NinePlus Platform service contract.
 
-> **Branch notice:** `main` is server-only and no longer includes the dual-mode connection path. Use the `nine-proxy` branch when dual-mode support is required.
+The `main` branch is the integrated project baseline for both clients. NinePlus Platform remains a separate service and deployment concern.
 
 ## Features
 
