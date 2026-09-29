@@ -115,6 +115,9 @@ struct NinebotTimelineProvider: TimelineProvider {
         var images = cachedVehicleImages(for: dashboard, store: store)
 
         for snapshot in dashboard.vehicles {
+            if images[snapshot.vehicle.sn] != nil {
+                continue
+            }
             guard let urlString = snapshot.vehicle.imageURLString,
                   let url = URL(string: urlString) else {
                 continue

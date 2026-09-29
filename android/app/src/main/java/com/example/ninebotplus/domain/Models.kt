@@ -361,7 +361,10 @@ data class VehicleState(
     val batteryTemperature: Double? = null,
     val batteryCycleCount: Int? = null,
     val chargingPower: Double? = null,
-    val endurance: Double? = null,
+    /** 官方预估续航（`estimate_mileage`）。 */
+    val estimateMileage: Double? = null,
+    /** 官方精准续航（`precise_estimate_mileage`）。 */
+    val preciseEstimateMileage: Double? = null,
     val aiEstimatedMileage: Double? = null,
     val isCharging: Boolean? = null,
     val isPoweredOn: Boolean? = null,
@@ -393,32 +396,30 @@ data class VehicleState(
     val isFullyCharged: Boolean get() = (battery ?: 0) >= 100
 
     val officialEstimatedMileage: Double?
-        get() = endurance?.let { maxOf(it, 0.0) }
+        get() = estimateMileage?.let { maxOf(it, 0.0) }
 
-    val localEstimatedMileage: Double?
-        get() {
-            val server = serverPrediction?.range?.estimatedRange
-            if (server != null && server >= 0) return server
-            return officialEstimatedMileage
-        }
-
-    val usesServerAlgorithmEstimate: Boolean
-        get() {
-            val range = serverPrediction?.range?.estimatedRange ?: return false
-            return range >= 0
-        }
-
-    val predictionModelTitle: String
-        get() = if (usesServerAlgorithmEstimate) "算法预估" else "官方预估"
-
-    val localEstimatedMileageText: String
-        get() = localEstimatedMileage?.let { "${NumberFormats.number(it, 1)} km" } ?: "-- km"
+    /** 精准续航；缺失时回退官方预估，供组件/通知等紧凑场景展示。 */
+    val preferredOfficialRange: Double?
+        get() = preciseEstimateMileage?.let { maxOf(it, 0.0) } ?: officialEstimatedMileage
 
     val officialEstimatedMileageText: String
         get() = officialEstimatedMileage?.let { "${NumberFormats.number(it, 1)} km" } ?: "接口未返回"
 
+    val preciseEstimateMileageText: String
+        get() = preciseEstimateMileage?.let { maxOf(it, 0.0) }
+            ?.let { "${NumberFormats.number(it, 1)} km" } ?: "接口未返回"
+
+    val preferredOfficialRangeText: String
+        get() = preferredOfficialRange?.let { "${NumberFormats.number(it, 1)} km" } ?: "-- km"
+
+    val localEstimatedMileage: Double?
+        get() = preferredOfficialRange
+
+    val localEstimatedMileageText: String
+        get() = preferredOfficialRangeText
+
     val enduranceText: String
-        get() = NumberFormats.distanceKm(localEstimatedMileage ?: endurance)
+        get() = preferredOfficialRangeText
 
     val chargingStateText: String
         get() = when {
@@ -569,69 +570,27 @@ data class VehicleState(
 
     val rangePerBatteryPercent: Double?
         get() {
-            if (usesServerAlgorithmEstimate) {
-                val server = serverPrediction?.range?.kmPerPercent
-                if (server != null && server > 0) return server
-            }
             val level = battery ?: return null
             if (level <= 0) return null
-            val end = endurance ?: return null
+            val end = preferredOfficialRange ?: return null
             return maxOf(end, 0.0) / level
         }
 
     val rangePerBatteryPercentText: String
         get() = rangePerBatteryPercent?.let { "${NumberFormats.number(it, 2)} km/%" } ?: "-- km/%"
 
-    val rangeEstimateAccuracy: Double?
-        get() = serverPrediction?.range?.accuracyPercent?.let { (it / 100.0).coerceIn(0.0, 1.0) }
-
-    val rangeEstimateAccuracyText: String
-        get() = rangeEstimateAccuracy?.let { "${NumberFormats.number(it * 100, 0)}%" } ?: "样本不足"
-
-    val observedRangeSampleCount: Int
-        get() = serverPrediction?.range?.sampleCount?.takeIf { it > 0 } ?: 0
-
-    val rangeEstimateAccuracyDetailText: String
-        get() {
-            val count = serverPrediction?.range?.sampleCount
-            if (count != null && count > 0) {
-                if (serverPrediction?.range?.accuracySource == "measured") {
-                    val verified = serverPrediction?.range?.measuredSampleCount ?: count
-                    return "实测预测误差 · $verified 次已验证行程"
-                }
-                return "算法服务端 · $count 次有效行程"
-            }
-            return if (serverPrediction == null) "服务端未返回算法指标" else "服务端样本不足"
-        }
+    val localEstimateBasisText: String
+        get() = "展示九号云端官方预估与精准续航。"
 
     val rangeModelInsightText: String
         get() = when {
-            usesServerAlgorithmEstimate && serverPrediction?.range?.source == "default" ->
-                "服务端样本不足，当前使用默认算法估算。"
-            usesServerAlgorithmEstimate && (rangeEstimateAccuracy ?: 0.0) >= 0.82 ->
-                "服务端近期样本稳定，估算可信。"
-            usesServerAlgorithmEstimate ->
-                "服务端已根据近期行程持续校准。"
-            serverPrediction != null ->
-                "服务端未给出可用算法续航，当前显示官方预估。"
-            else ->
-                "服务端未返回算法预测，当前显示官方预估。"
-        }
-
-    val localEstimateBasisText: String
-        get() {
-            val prediction = serverPrediction
-            val estimated = prediction?.range?.estimatedRange
-            if (prediction != null && estimated != null && estimated >= 0) {
-                val sampleText = prediction.range.sampleCount?.let { "$it 次有效行程" } ?: "历史样本"
-                return when (prediction.range.source) {
-                    "personalized", "personalized_blend" ->
-                        "算法服务端结合官方预估和 $sampleText 持续校准。"
-                    else ->
-                        "服务端默认算法基于 $sampleText 计算。"
-                }
-            }
-            return "服务端未返回算法预测，当前显示官方预估。"
+            officialEstimatedMileage == null && preciseEstimateMileage == null ->
+                "接口未返回续航字段。"
+            preciseEstimateMileage == null ->
+                "接口未返回精准续航，仅展示官方预估。"
+            estimateMileage == null ->
+                "接口未返回官方预估，仅展示精准续航。"
+            else -> "官方预估与精准续航均来自九号云端。"
         }
 
     val batteryVoltageText: String
@@ -770,7 +729,7 @@ data class VehicleHistoryPoint(
                 sn = sn,
                 date = state.updatedAt,
                 battery = state.battery,
-                endurance = state.endurance,
+                endurance = state.preferredOfficialRange,
                 totalMileage = state.totalMileage,
                 isCharging = state.isCharging,
                 isLocked = state.isLocked,

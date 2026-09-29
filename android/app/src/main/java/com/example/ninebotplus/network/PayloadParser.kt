@@ -282,8 +282,12 @@ object PayloadParser {
             ),
             batteryCycleCount = firstInt(listOf("bms_cycle", "bmsCycle", "cycle", "cycles"), batterySources),
             chargingPower = firstDouble(listOf("charging_power", "chargingPower", "charge_power", "chargePower"), batterySources),
-            endurance = firstDouble(
-                listOf("estimate_mileage", "estimateMileage", "precise_estimate_mileage", "preciseEstimateMileage"),
+            estimateMileage = firstDouble(
+                listOf("estimate_mileage", "estimateMileage"),
+                statusSources,
+            ),
+            preciseEstimateMileage = firstDouble(
+                listOf("precise_estimate_mileage", "preciseEstimateMileage"),
                 statusSources,
             ),
             aiEstimatedMileage = firstDouble(
@@ -392,27 +396,6 @@ object PayloadParser {
                 mileage = mileage,
             )
         }
-    }
-
-    fun totalMileageFromMonthlyTravels(travels: List<JsonValue>?): Double? {
-        if (travels == null) return null
-        var total = 0.0
-        var hasMileage = false
-        for (travel in travels) {
-            val obj = travel.objectValue ?: continue
-            val mileage = firstDouble(listOf("total_mileages", "totalMileage", "monthMileage", "mileage"), obj)
-            if (mileage != null) {
-                total += maxOf(mileage, 0.0)
-                hasMileage = true
-                continue
-            }
-            val dailyTotal = dailyMileageRecords(obj).sumOf { maxOf(it.mileage, 0.0) }
-            if (dailyTotal > 0) {
-                total += dailyTotal
-                hasMileage = true
-            }
-        }
-        return if (hasMileage) total else null
     }
 
     fun normalizedBatteryVoltage(value: Double?): Double? {

@@ -184,9 +184,14 @@ class VehicleRepository(
         val client = NinePlusApiClient(configuration)
         val page = client.syncTravelMonth(sn, month, pageSize)
         upsertInterfaceRideRecords(page.records, sn)
-        val dashboard = saveDashboard(client.fetchDashboard(sn))
-        cacheVehicleImages(dashboard)
-        resolveAddresses(dashboard, force = false)
+    }
+
+    /** 按需拉取某月行程并归档到 Room，不触发完整 dashboard 刷新。 */
+    suspend fun loadTravelMonth(sn: String, month: String) {
+        val configuration = requireConfiguration()
+        val payload = NinePlusApiClient(configuration).fetchTravelMonth(sn, month)
+        val page = PayloadParser.travelPage(payload, month)
+        upsertInterfaceRideRecords(page.records, sn)
     }
 
     suspend fun refreshRideDetail(sn: String, rideId: String, force: Boolean = false): RideDetail {
@@ -430,6 +435,8 @@ class VehicleRepository(
         for (snapshot in dashboard.vehicles) {
             val url = snapshot.vehicle.imageUrlString?.trim().orEmpty()
             if (url.isEmpty()) continue
+            val file = vehicleImageFile(snapshot.vehicle.sn)
+            if (file.exists() && file.length() > 0) continue
             runCatching {
                 val connection = java.net.URI(url).toURL().openConnection().apply {
                     connectTimeout = 8_000
@@ -437,7 +444,6 @@ class VehicleRepository(
                 }
                 val bytes = connection.getInputStream().use { it.readBytes() }
                 if (bytes.isEmpty() || bytes.size > 2_500_000) return@runCatching
-                val file = vehicleImageFile(snapshot.vehicle.sn)
                 file.parentFile?.mkdirs()
                 file.writeBytes(bytes)
             }
@@ -504,7 +510,7 @@ class VehicleRepository(
             fun q(value: String?) = value?.let { "\"${it.replace("\"", "\\\"")}\"" } ?: "null"
             fun n(value: Number?) = value?.toString() ?: "null"
             fun b(value: Boolean?) = value?.toString() ?: "null"
-            """{"sn":${q(v.sn)},"name":${q(v.name)},"model":${q(v.model)},"imageUrl":${q(v.imageUrlString)},"battery":${n(s.battery)},"endurance":${n(s.endurance)},"isCharging":${b(s.isCharging)},"isLocked":${b(s.isLocked)},"isPoweredOn":${b(s.isPoweredOn)},"latitude":${n(s.latitude)},"longitude":${n(s.longitude)},"totalMileage":${n(s.totalMileage)},"monthMileage":${n(s.monthMileage)},"updatedAt":${s.updatedAt.time}}"""
+            """{"sn":${q(v.sn)},"name":${q(v.name)},"model":${q(v.model)},"imageUrl":${q(v.imageUrlString)},"battery":${n(s.battery)},"estimate":${n(s.estimateMileage)},"precise":${n(s.preciseEstimateMileage)},"endurance":${n(s.preferredOfficialRange)},"isCharging":${b(s.isCharging)},"isLocked":${b(s.isLocked)},"isPoweredOn":${b(s.isPoweredOn)},"latitude":${n(s.latitude)},"longitude":${n(s.longitude)},"totalMileage":${n(s.totalMileage)},"monthMileage":${n(s.monthMileage)},"updatedAt":${s.updatedAt.time}}"""
         }
         return """{"selectedSn":${dashboard.selectedSn?.let { "\"$it\"" } ?: "null"},"updatedAt":${dashboard.updatedAt.time},"vehicles":[$vehicles]}"""
     }
@@ -527,7 +533,8 @@ class VehicleRepository(
                     ),
                     state = com.example.ninebotplus.domain.VehicleState(
                         battery = v["battery"]?.intValue,
-                        endurance = v["endurance"]?.doubleValue,
+                        estimateMileage = v["estimate"]?.doubleValue ?: v["endurance"]?.doubleValue,
+                        preciseEstimateMileage = v["precise"]?.doubleValue,
                         isCharging = v["isCharging"]?.boolValue,
                         isLocked = v["isLocked"]?.boolValue,
                         isPoweredOn = v["isPoweredOn"]?.boolValue,
