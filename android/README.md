@@ -15,7 +15,7 @@
 | JSON | kotlinx.serialization + `PayloadParser` 兼容层 |
 | 配置 | DataStore（URL）+ EncryptedSharedPreferences（凭证） |
 | 业务数据 | Room |
-| 地图 | MapLibre（GCJ-02 纠偏内置） |
+| 地图 | 高德 Android Map SDK（矢量，GCJ-02 纠偏内置） |
 | 后台 | WorkManager + Foreground Service |
 | 推送 | FCM（可选，见下） |
 | 桌面组件 | AppWidgetProvider |
@@ -32,6 +32,17 @@ cd android
 ```
 
 需要 JDK 17，Android SDK Platform 35。
+
+### 地图与模拟器
+
+地图使用高德 3D SDK（`android/local.properties` 的 `amap.key`，已 gitignore）。高德 GL 在
+**host GPU（Apple Silicon Metal 转译）** 下会 `createContext failed` 并杀进程。模拟器请使用软件 GL：
+
+- Android Studio：Device Manager → 编辑 AVD → Show Advanced Settings → **Graphics = Software - GLES 2.0 / 3.0**（等价 `hw.gpu.mode=swiftshader_indirect`）
+- 或启动参数：`emulator -avd <name> -gpu swiftshader_indirect -no-snapshot-load`
+- 改完必须**冷启动**（快照会让旧 GPU 模式继续生效）
+
+真机不受影响。冒烟：`./gradlew connectedDebugAndroidTest`（`AmapGlSmokeTest`）。
 
 ### Release 签名
 
