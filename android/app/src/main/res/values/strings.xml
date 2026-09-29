@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NinePlus</string>
+    <string name="widget_name">九号车况</string>
+    <string name="widget_description">显示电量、续航和车辆状态，支持快捷刷新</string>
+</resources>

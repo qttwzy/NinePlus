@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tesla_green">#21D147</color>
+    <color name="tesla_red">#FF453A</color>
+    <color name="tesla_orange">#FF9F0A</color>
+    <color name="widget_bg">#131418</color>
+    <color name="widget_text">#F5F6F7</color>
+    <color name="widget_secondary">#9AA0A6</color>
+</resources>
