@@ -23,13 +23,22 @@ android {
         applicationId = "com.example.ninebotplus"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.2.3"
+        versionCode = 9
+        versionName = "1.2.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         // Injected into AndroidManifest meta-data for AMap Android Map SDK.
         manifestPlaceholders["amapKey"] = amapKey
         buildConfigField("String", "AMAP_KEY", "\"$amapKey\"")
+        // Personal debug login prefill — values live only in local.properties.
+        fun lp(key: String): String =
+            localProperties.getProperty(key)?.trim().orEmpty()
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+        buildConfigField("String", "NPP_DEFAULT_SERVER", "\"${lp("npp.server")}\"")
+        buildConfigField("String", "NPP_DEFAULT_BEARER", "\"${lp("npp.bearer")}\"")
+        buildConfigField("String", "NPP_DEFAULT_PHONE", "\"${lp("npp.phone")}\"")
+        buildConfigField("String", "NPP_DEFAULT_PASSWORD", "\"${lp("npp.password")}\"")
     }
 
     signingConfigs {

@@ -255,9 +255,13 @@ private fun LoginContent(
     account: String,
     uiMessage: String?,
 ) {
-    var password by remember { mutableStateOf("") }
+    var password by remember {
+        mutableStateOf(com.example.ninebotplus.ui.DebugLoginDefaults.password)
+    }
     var showPassword by remember { mutableStateOf(false) }
-    var agreed by remember { mutableStateOf(false) }
+    var agreed by remember {
+        mutableStateOf(com.example.ninebotplus.ui.DebugLoginDefaults.hasAny)
+    }
 
     Column(
         Modifier
