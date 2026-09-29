@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -217,24 +218,31 @@ fun DashboardScreen(viewModel: AppViewModel) {
     }
 
     if (showMap) {
+        android.util.Log.i("NinePlusMap", "open vehicle map dialog")
         val lat = vehicle.state.latitude
         val lon = vehicle.state.longitude
-        AlertDialog(
-            onDismissRequest = { showMap = false },
-            title = { Text("车辆位置") },
-            text = {
-                if (lat == null || lon == null) {
-                    Text("车辆暂无可显示的坐标")
-                } else {
-                    androidx.compose.foundation.layout.Column {
+        val privacy = viewModel.capturePrivacy.collectAsState().value
+        // Dialog (not AlertDialog) keeps a fixed surface for TextureMapView.
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showMap = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("车辆位置", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Spacer(Modifier.height(12.dp))
+                    if (lat == null || lon == null) {
+                        Text("车辆暂无可显示的坐标")
+                    } else {
                         com.example.ninebotplus.ui.map.VehicleLocationMap(
                             latitude = lat,
                             longitude = lon,
                             title = vehicle.vehicle.name,
-                            privacyEnabled = viewModel.capturePrivacy.collectAsState().value,
+                            privacyEnabled = privacy,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(280.dp),
+                                .height(300.dp)
+                                .clip(RoundedCornerShape(12.dp)),
                         )
                         Text(
                             resolved[vehicle.vehicle.sn]?.address
@@ -244,12 +252,16 @@ fun DashboardScreen(viewModel: AppViewModel) {
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(
+                        onClick = { showMap = false },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text("关闭")
+                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showMap = false }) { Text("关闭") }
-            },
-        )
+            }
+        }
     }
 }
 
@@ -504,18 +516,27 @@ private fun LocationRideCards(
                     if (privacyEnabled) {
                         Text("位置已隐藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else if (lat != null && lon != null) {
-                        com.example.ninebotplus.ui.map.VehicleLocationMap(
-                            latitude = lat,
-                            longitude = lon,
-                            title = snapshot.vehicle.name,
-                            privacyEnabled = false,
-                            compact = true,
-                            onPreviewClick = onOpenMap,
-                            modifier = Modifier
+                        Box(
+                            Modifier
                                 .fillMaxWidth()
                                 .height(88.dp)
                                 .clip(RoundedCornerShape(12.dp)),
-                        )
+                        ) {
+                            com.example.ninebotplus.ui.map.VehicleLocationMap(
+                                latitude = lat,
+                                longitude = lon,
+                                title = snapshot.vehicle.name,
+                                privacyEnabled = false,
+                                compact = true,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            // TextureMapView still occupies hit-tests; overlay owns the tap.
+                            Box(
+                                Modifier
+                                    .matchParentSize()
+                                    .clickable(onClick = onOpenMap),
+                            )
+                        }
                     } else {
                         Icon(
                             Icons.Default.Place,

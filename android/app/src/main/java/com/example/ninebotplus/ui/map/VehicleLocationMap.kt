@@ -1,5 +1,6 @@
 package com.example.ninebotplus.ui.map
 
+import android.annotation.SuppressLint
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
@@ -7,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -23,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
-import com.amap.api.maps.MapView
+import com.amap.api.maps.TextureMapView
 import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
@@ -35,77 +37,60 @@ import com.example.ninebotplus.util.CoordinateTransform
 private const val TAG = "NinePlusMap"
 
 /**
- * Host container: [MapView] + optional Android click overlay.
+ * TextureMapView host.
  *
- * MapView 是 SurfaceView，在模拟器/部分机型上会吞掉 Compose 覆盖层的点击。
- * compact 预览需要「点一下打开全屏」时，在 MapView 之上加一层真正的
- * Android View 承接点击。
- *
- * 生命周期：onCreate/onResume；离开时 onPause + 下一帧 onDestroy（避开 GL 竞态）。
+ * 使用 TextureView 而不是 SurfaceView：避免「打洞」导致 Dialog 不可见、
+ * Compose 覆盖层点不到。compact 预览可完全透传触摸，由外层 Card clickable 处理。
  */
-private class AmapViewContainer(context: android.content.Context) : FrameLayout(context) {
-    val mapView: MapView = MapView(context)
-    val clickOverlay: View = View(context)
+private class AmapHost(context: android.content.Context) : FrameLayout(context) {
+    @SuppressLint("ClickableViewAccessibility")
+    val mapView: TextureMapView = TextureMapView(context).apply {
+        // Preview maps must not steal clicks from the surrounding Compose card.
+        isClickable = false
+        isFocusable = false
+        isLongClickable = false
+        setOnTouchListener { _: View?, _: MotionEvent? -> false }
+    }
 
     init {
         addView(mapView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        addView(clickOverlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        clickOverlay.visibility = View.GONE
-    }
-
-    /** Show an Android view above MapView so taps open the parent action (SurfaceView eats Compose clicks). */
-    fun setPreviewClickThrough(enabled: Boolean, onClick: (() -> Unit)?) {
-        clickOverlay.visibility = if (enabled) View.VISIBLE else View.GONE
-        clickOverlay.isClickable = enabled
-        clickOverlay.isFocusable = enabled
-        clickOverlay.setOnClickListener(
-            if (enabled) {
-                View.OnClickListener { onClick?.invoke() }
-            } else {
-                null
-            },
-        )
     }
 }
 
-/**
- * Creates an AMap map host with Compose lifecycle.
- */
 @Composable
-private fun rememberAmapView(
-    passThroughTouch: Boolean = false,
-    onSurfaceClick: (() -> Unit)? = null,
-): AmapViewContainer {
+private fun rememberAmapHost(interactive: Boolean): AmapHost {
     val context = LocalContext.current.applicationContext
-    val container = remember { AmapViewContainer(context) }
-    container.setPreviewClickThrough(passThroughTouch, onSurfaceClick)
+    val host = remember { AmapHost(context) }
+    // Full maps keep gestures; preview maps stay passive so the card is clickable.
+    host.mapView.setOnTouchListener { _: View?, _: MotionEvent? -> !interactive }
+    host.mapView.isClickable = interactive
 
-    DisposableEffect(container) {
-        val mapView = container.mapView
+    DisposableEffect(host) {
+        val mapView = host.mapView
         try {
             com.amap.api.maps.MapsInitializer.updatePrivacyShow(context, true, true)
             com.amap.api.maps.MapsInitializer.updatePrivacyAgree(context, true)
             mapView.onCreate(null)
             mapView.onResume()
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "amap MapView init failed", e)
+            android.util.Log.e(TAG, "amap TextureMapView init failed", e)
         }
         onDispose {
             try {
                 mapView.onPause()
             } catch (e: Exception) {
-                android.util.Log.w(TAG, "amap MapView pause", e)
+                android.util.Log.w(TAG, "amap TextureMapView pause", e)
             }
-            container.post {
+            host.post {
                 try {
                     mapView.onDestroy()
                 } catch (e: Exception) {
-                    android.util.Log.w(TAG, "amap MapView destroy", e)
+                    android.util.Log.w(TAG, "amap TextureMapView destroy", e)
                 }
             }
         }
     }
-    return container
+    return host
 }
 
 private fun AMap.applyChinaChrome(interactive: Boolean = true) {
@@ -123,6 +108,8 @@ private fun AMap.applyChinaChrome(interactive: Boolean = true) {
 /**
  * Vehicle location map (高德官方 3D 地图 SDK).
  * Coordinates are raw WGS-84; [MapProviderConfig.toMapCoordinate] converts to GCJ-02 once.
+ *
+ * [compact] = true 时地图不处理触摸，点击由外层 Card 负责（打开全屏）。
  */
 @Composable
 fun VehicleLocationMap(
@@ -146,10 +133,7 @@ fun VehicleLocationMap(
     val gcj = remember(latitude, longitude) {
         MapProviderConfig.toMapCoordinate(latitude, longitude)
     }
-    val mapHost = rememberAmapView(
-        passThroughTouch = compact,
-        onSurfaceClick = if (compact) onPreviewClick else null,
-    )
+    val mapHost = rememberAmapHost(interactive = !compact)
 
     Box(modifier = modifier) {
         AndroidView(
@@ -166,7 +150,25 @@ fun VehicleLocationMap(
                     .anchor(0.5f, 0.5f)
                     .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)),
             )
-            amap.moveCamera(CameraUpdateFactory.newLatLngZoom(target, if (compact) 15f else 15.5f))
+            amap.moveCamera(
+                CameraUpdateFactory.newLatLngZoom(target, if (compact) 15f else 15.5f),
+            )
+        }
+        if (compact && onPreviewClick != null) {
+            // Visible affordance; touch is handled by the surrounding card.
+            Text(
+                "点击放大",
+                fontSize = 10.sp,
+                color = TeslaGreen,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
         Column(
             Modifier
@@ -228,7 +230,7 @@ fun RideTrackMap(
     val gcjPoints = remember(points) {
         points.map { MapProviderConfig.toMapCoordinate(it.latitude, it.longitude) }
     }
-    val mapHost = rememberAmapView(passThroughTouch = false)
+    val mapHost = rememberAmapHost(interactive = true)
 
     Box(modifier = modifier) {
         AndroidView(
