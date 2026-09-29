@@ -510,16 +510,11 @@ private fun LocationRideCards(
                             title = snapshot.vehicle.name,
                             privacyEnabled = false,
                             compact = true,
+                            onPreviewClick = onOpenMap,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(88.dp)
                                 .clip(RoundedCornerShape(12.dp)),
-                        )
-                        // MapView steals taps; overlay keeps 「点击打开全屏地图」 working.
-                        Box(
-                            Modifier
-                                .matchParentSize()
-                                .clickable(onClick = onOpenMap),
                         )
                     } else {
                         Icon(
