@@ -92,11 +92,22 @@ class NinePlusApp : Application() {
                 description = "后台刷新车况"
             },
         )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_PUSH,
+                "远程推送",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "NinePlus Platform 下发的远程通知"
+                enableVibration(true)
+            },
+        )
     }
 
     companion object {
         const val CHANNEL_CHARGING = "charging"
         const val CHANNEL_RIDE = "ride_recording"
         const val CHANNEL_WIDGET = "widget"
+        const val CHANNEL_PUSH = "push"
     }
 }

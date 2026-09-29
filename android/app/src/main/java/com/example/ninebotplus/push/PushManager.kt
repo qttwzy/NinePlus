@@ -159,11 +159,14 @@ class PushManager(
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = NotificationCompat.Builder(context, NinePlusApp.CHANNEL_CHARGING)
+        val notification = NotificationCompat.Builder(context, NinePlusApp.CHANNEL_PUSH)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title ?: "NinePlus")
             .setContentText(body ?: "")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body ?: ""))
             .setContentIntent(pending)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .build()
         notifySafely((System.currentTimeMillis() % 10_000).toInt(), notification)

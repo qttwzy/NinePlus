@@ -149,6 +149,11 @@ class AppViewModel(
                 refreshLocalCaches()
                 status("登录成功")
             }
+            // Best-effort push registration after a fresh session; do not fail login UX.
+            runCatching {
+                app.pushManager.ensureFcmToken()
+                repository.registerPushTokenToServer()
+            }
         }
     }
 
@@ -253,9 +258,11 @@ class AppViewModel(
                 } catch (e: Exception) {
                     val msg = e.message.orEmpty()
                     when {
+                        msg.contains("会话") || msg.contains("登录") || msg.contains("401") ->
+                            status("登录会话已失效，请重新登录后再上报推送")
                         msg.contains("Token", ignoreCase = true) || msg.contains("token") ->
                             status(
-                                "推送设备 Token 尚未就绪：请配置 google-services.json 或 local.properties 的 firebase.* 后重试。本地充电通知仍可工作",
+                                "未取到推送 Token：当前网络无法访问 Google（FCM 需要 firebaseinstallations.googleapis.com）。可开代理/VPN 后重试；本地充电通知不受影响",
                             )
                         msg.contains("通知权限") ->
                             status("通知权限未授权，请在系统设置中允许通知")
