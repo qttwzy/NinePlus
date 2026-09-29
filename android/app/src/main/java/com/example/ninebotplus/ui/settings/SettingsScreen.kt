@@ -146,7 +146,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     fontSize = 12.sp,
                 )
                 Text(
-                    "FCM 为可选能力：客户端管道已就绪，需要 Platform 配置 Android 推送并提供 google-services.json 后才能端到端工作。",
+                    "FCM 为可选能力：客户端管道已就绪。启用远程推送需 Platform 配置 Android FCM，并在客户端提供 Firebase 配置（android/app/google-services.json，或 local.properties 的 firebase.*）。",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

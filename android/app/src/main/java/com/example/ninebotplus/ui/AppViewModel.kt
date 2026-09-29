@@ -245,15 +245,18 @@ class AppViewModel(
     fun enablePush() {
         viewModelScope.launch {
             runOperation("正在开启充电通知") {
-                // registerPushTokenToServer throws when no token; surface a clear reason.
+                // Pull a token first: onNewToken only fires on rotation.
                 try {
+                    app.pushManager.ensureFcmToken()
                     repository.registerPushTokenToServer()
                     status("充电通知已开启")
                 } catch (e: Exception) {
                     val msg = e.message.orEmpty()
                     when {
                         msg.contains("Token", ignoreCase = true) || msg.contains("token") ->
-                            status("推送设备 Token 尚未就绪（FCM 未配置或服务端未开通），本地充电通知仍可工作")
+                            status(
+                                "推送设备 Token 尚未就绪：请配置 google-services.json 或 local.properties 的 firebase.* 后重试。本地充电通知仍可工作",
+                            )
                         msg.contains("通知权限") ->
                             status("通知权限未授权，请在系统设置中允许通知")
                         else -> error(msg.ifBlank { "推送上报失败" })
