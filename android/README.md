@@ -123,10 +123,11 @@ client plumbing available / server support required
 ```
 
 - 充电常驻通知：**不依赖 FCM**，刷新车况后自动起停
-- 远程推送：需要
-  1. Firebase 项目 + `android/app/google-services.json`
-  2. `google-services` Gradle 插件
-  3. NinePlus Platform 支持 Android FCM 注册与下发
+- 远程推送：客户端两条配置路径任选其一 + Platform 下发
+  1. **标准**：Firebase 项目 + `android/app/google-services.json`（已在 .gitignore；存在时自动应用 `google-services` 插件）
+  2. **自托管**：`local.properties` 填 `firebase.api_key` / `firebase.app_id` / `firebase.project_id` / `firebase.gcm_sender_id`（可选 `firebase.default_web_client_id`），由 `PushManager` 手动 `FirebaseApp.initializeApp`
+  3. NinePlus Platform 支持 Android FCM 注册（`POST /devices/register`）与下发
+- 点「检查权限并上报推送」会**主动拉取** FCM token（不只依赖 `onNewToken`）再注册到 Platform
 
 ## 真机验证
 

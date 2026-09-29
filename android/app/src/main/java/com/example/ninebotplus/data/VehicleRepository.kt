@@ -284,6 +284,8 @@ class VehicleRepository(
         _pushToken.value = token
     }
 
+    suspend fun currentPushToken(): String? = settings.pushToken()
+
     suspend fun registerPushTokenToServer() {
         val token = settings.pushToken() ?: throw ApiException.Server("还没有推送设备 Token")
         val configuration = requireConfiguration()

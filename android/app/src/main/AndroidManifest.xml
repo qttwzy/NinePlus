@@ -25,6 +25,11 @@
             android:name="com.amap.api.v2.apikey"
             android:value="${amapKey}" />
 
+        <!-- Route system-displayed FCM notifications to the push channel. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="push" />
+
 
         <activity
             android:name=".MainActivity"

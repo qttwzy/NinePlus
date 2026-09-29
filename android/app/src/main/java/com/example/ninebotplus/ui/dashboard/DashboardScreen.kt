@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,6 +63,7 @@ import com.example.ninebotplus.ui.theme.TeslaOrange
 import com.example.ninebotplus.ui.theme.TeslaRed
 import com.example.ninebotplus.util.NineplusDates
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(viewModel: AppViewModel) {
     val dashboard by viewModel.dashboard.collectAsState()
@@ -97,68 +99,74 @@ fun DashboardScreen(viewModel: AppViewModel) {
     }
     val vehicle = primary
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+    PullToRefreshBox(
+        isRefreshing = ui.isLoading,
+        onRefresh = { viewModel.refreshDashboard() },
+        modifier = Modifier.fillMaxSize(),
     ) {
-        if (ui.statusMessage != null) {
-            StatusBanner(ui.statusMessage!!, isError = false)
-        }
-        if (ui.errorMessage != null) {
-            StatusBanner(ui.errorMessage!!, isError = true)
-        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (ui.statusMessage != null) {
+                StatusBanner(ui.statusMessage!!, isError = false)
+            }
+            if (ui.errorMessage != null) {
+                StatusBanner(ui.errorMessage!!, isError = true)
+            }
 
-        HeroSection(
-            snapshot = vehicle,
-            resolvedAddress = resolved[vehicle.vehicle.sn]?.address,
-            onSwitchVehicle = { showSwitcher = true },
-            onOpenMap = { showMap = true },
-            onShowRangeInfo = { showRangeInfo = true },
-            canSwitch = dashboard.vehicles.size > 1,
-        )
-
-        if (ui.activeAction != null && ui.activeActionSn == vehicle.vehicle.sn) {
-            LoadingStrip(ui.activeAction!!.loadingTitle)
-        }
-
-        ActionPanel(
-            snapshot = vehicle,
-            isLoading = ui.isLoading,
-            onAction = { action ->
-                if (action.isDangerous) {
-                    confirmAction = action
-                    confirmSn = vehicle.vehicle.sn
-                } else {
-                    viewModel.perform(action, vehicle.vehicle.sn)
-                }
-            },
-        )
-
-        LocationRideCards(
-            snapshot = vehicle,
-            resolvedAddress = resolved[vehicle.vehicle.sn]?.address,
-            privacyEnabled = viewModel.capturePrivacy.collectAsState().value,
-            onOpenMap = { showMap = true },
-        )
-
-        BatteryCard(snapshot = vehicle)
-        InfoCard(snapshot = vehicle)
-
-        if (dashboard.vehicles.size > 1) {
-            Text(
-                "车辆概览",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+            HeroSection(
+                snapshot = vehicle,
+                resolvedAddress = resolved[vehicle.vehicle.sn]?.address,
+                onSwitchVehicle = { showSwitcher = true },
+                onOpenMap = { showMap = true },
+                onShowRangeInfo = { showRangeInfo = true },
+                canSwitch = dashboard.vehicles.size > 1,
             )
-            dashboard.vehicles.forEach { snapshot ->
-                VehicleRow(
-                    snapshot = snapshot,
-                    selected = snapshot.vehicle.sn == vehicle.vehicle.sn,
-                    onClick = { viewModel.selectVehicle(snapshot.vehicle.sn) },
+
+            if (ui.activeAction != null && ui.activeActionSn == vehicle.vehicle.sn) {
+                LoadingStrip(ui.activeAction!!.loadingTitle)
+            }
+
+            ActionPanel(
+                snapshot = vehicle,
+                isLoading = ui.isLoading,
+                onAction = { action ->
+                    if (action.isDangerous) {
+                        confirmAction = action
+                        confirmSn = vehicle.vehicle.sn
+                    } else {
+                        viewModel.perform(action, vehicle.vehicle.sn)
+                    }
+                },
+            )
+
+            LocationRideCards(
+                snapshot = vehicle,
+                resolvedAddress = resolved[vehicle.vehicle.sn]?.address,
+                privacyEnabled = viewModel.capturePrivacy.collectAsState().value,
+                onOpenMap = { showMap = true },
+            )
+
+            BatteryCard(snapshot = vehicle)
+            InfoCard(snapshot = vehicle)
+
+            if (dashboard.vehicles.size > 1) {
+                Text(
+                    "车辆概览",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                 )
+                dashboard.vehicles.forEach { snapshot ->
+                    VehicleRow(
+                        snapshot = snapshot,
+                        selected = snapshot.vehicle.sn == vehicle.vehicle.sn,
+                        onClick = { viewModel.selectVehicle(snapshot.vehicle.sn) },
+                    )
+                }
             }
         }
     }

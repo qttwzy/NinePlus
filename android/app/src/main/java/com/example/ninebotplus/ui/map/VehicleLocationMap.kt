@@ -209,14 +209,38 @@ fun VehicleLocationMap(
     }
 }
 
+/** Green → orange → red ARGB matching TripSpeedViews.speedAccentColor. */
+private fun speedAccentArgb(relative: Double): Int {
+    val t = relative.coerceIn(0.0, 1.0)
+    val r: Int
+    val g: Int
+    val b: Int
+    if (t < 0.5) {
+        val u = (t / 0.5).toFloat()
+        r = (0x21 + (0xFF - 0x21) * u).toInt()
+        g = (0xD1 + (0x9F - 0xD1) * u).toInt()
+        b = (0x47 + (0x0A - 0x47) * u).toInt()
+    } else {
+        val u = ((t - 0.5) / 0.5).toFloat()
+        r = 0xFF
+        g = (0x9F + (0x45 - 0x9F) * u).toInt()
+        b = (0x0A + (0x3A - 0x0A) * u).toInt()
+    }
+    return android.graphics.Color.rgb(r, g, b)
+}
+
 /**
  * Ride track map: polyline + start/end markers + fit bounds.
  * Input coordinates are raw WGS-84; transform happens here once (GCJ-02 for AMap).
+ *
+ * When [speeds] is provided (same size as [points]), the track is drawn as
+ * per-segment polylines colored by that point's speed (green → orange → red).
  */
 @Composable
 fun RideTrackMap(
     points: List<CoordinateTransform.LatLng>,
     modifier: Modifier = Modifier,
+    speeds: List<Double?>? = null,
 ) {
     if (points.isEmpty()) {
         Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -242,12 +266,29 @@ fun RideTrackMap(
             amap.clear()
 
             val latLngs = gcjPoints.map { LatLng(it.latitude, it.longitude) }
-            amap.addPolyline(
-                PolylineOptions()
-                    .addAll(latLngs)
-                    .color(0xFF21D147.toInt())
-                    .width(10f),
-            )
+            val speedList = speeds?.takeIf { it.size == latLngs.size }
+            if (speedList != null && latLngs.size >= 2) {
+                val maxSpeed = speedList.filterNotNull().maxOrNull()?.takeIf { it > 0 } ?: 1.0
+                for (i in 0 until latLngs.size - 1) {
+                    val rel = com.example.ninebotplus.domain.TripSpeedAnalysis.relativeSpeed(
+                        speedList[i],
+                        maxSpeed,
+                    )
+                    amap.addPolyline(
+                        PolylineOptions()
+                            .add(latLngs[i], latLngs[i + 1])
+                            .color(speedAccentArgb(rel))
+                            .width(10f),
+                    )
+                }
+            } else {
+                amap.addPolyline(
+                    PolylineOptions()
+                        .addAll(latLngs)
+                        .color(0xFF21D147.toInt())
+                        .width(10f),
+                )
+            }
             amap.addMarker(
                 MarkerOptions()
                     .position(latLngs.first())

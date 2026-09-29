@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -374,7 +375,12 @@ private fun RideDetailDialog(
             .fillMaxSize()
             .padding(16.dp),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Row {
                 Text(
                     "行程详情",
@@ -406,7 +412,7 @@ private fun RideDetailDialog(
 
             if (detail != null) {
                 Spacer(Modifier.height(8.dp))
-                Text("接口轨迹", fontWeight = FontWeight.SemiBold)
+                Text("接口轨迹 · 速度分析", fontWeight = FontWeight.SemiBold)
                 val points = remember(detail) {
                     com.example.ninebotplus.domain.ServerTrackParser.parsePoints(detail.raw)
                 }
@@ -417,44 +423,57 @@ private fun RideDetailDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
+                    val profile = remember(points) {
+                        com.example.ninebotplus.domain.TripSpeedAnalysis.analyze(points)
+                    }
                     Text(
-                        "${points.size} 个轨迹点 · 每点含速度",
+                        "${points.size} 个轨迹点 · ${profile.stats.speedSampleCount} 个速度样本",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Real map: polyline + start/end, coordinates GCJ-02 once.
+                    TripSpeedStatsCard(stats = profile.stats, reportAverageKmh = ride.speed)
+                    SpeedProfileCard(profile = profile)
+                    SpeedHistogramCard(profile = profile)
+
+                    Text("接口轨迹地图（按速度着色）", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     com.example.ninebotplus.ui.map.RideTrackMap(
                         points = points.map {
                             com.example.ninebotplus.util.CoordinateTransform.LatLng(it.latitude, it.longitude)
                         },
+                        speeds = points.map { it.speedKmh },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(200.dp),
                     )
-                    // Per-point speed list (compact).
-                    Text("轨迹点速度", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    points.take(200).forEach { pt ->
-                        Row(Modifier.fillMaxWidth()) {
-                            Text(
-                                "#${pt.index + 1}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.width(36.dp),
-                            )
-                            Text(pt.speedText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.weight(1f))
-                            Text(pt.distanceText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "%.5f, %.5f".format(pt.latitude, pt.longitude),
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+
+                    Text("全程速度条带", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        "每个竖条是一个轨迹点，高度与颜色表示当时速度",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    SpeedBarPreview(
+                        speeds = points.map { it.speedKmh },
+                        maxSpeedKmh = profile.stats.maxKmh,
+                    )
+
+                    Text("逐点速度", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        "速度条越长颜色越偏红，表示该点越快",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    points.take(300).forEachIndexed { i, pt ->
+                        SpeedPointRow(
+                            sample = profile.samples[i],
+                            maxSpeedKmh = profile.stats.maxKmh,
+                            latitude = pt.latitude,
+                            longitude = pt.longitude,
+                        )
                     }
-                    if (points.size > 200) {
+                    if (points.size > 300) {
                         Text(
-                            "仅显示前 200 点，共 ${points.size} 点",
+                            "仅显示前 300 点，共 ${points.size} 点",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -42,8 +42,9 @@ VehicleRepository
 ## 车辆操作语义
 
 Platform 端点是 `/engine/start|stop`，对应 `pwr`（电源）。
-UI 使用「上电 / 熄火」，**不根据 `isLocked` 决定 engine 操作**。
-`lock_status` / `loc.lock` 仅用于展示。
+UI 文案使用「上电 / 熄火」。下一跳指令由 `PowerActionDecision` 决定：
+**锁状态优先**（已锁 ⇒ 上电，未锁 ⇒ 熄火），锁未知时回退 `pwr`，两者皆未知则禁用。
+`lock_status` / `loc.lock` 仍用于展示。
 
 ## RideRecorder
 

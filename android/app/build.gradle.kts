@@ -23,8 +23,8 @@ android {
         applicationId = "com.example.ninebotplus"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.2.6"
+        versionCode = 16
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         // Injected into AndroidManifest meta-data for AMap Android Map SDK.
@@ -39,6 +39,14 @@ android {
         buildConfigField("String", "NPP_DEFAULT_BEARER", "\"${lp("npp.bearer")}\"")
         buildConfigField("String", "NPP_DEFAULT_PHONE", "\"${lp("npp.phone")}\"")
         buildConfigField("String", "NPP_DEFAULT_PASSWORD", "\"${lp("npp.password")}\"")
+        // Optional FCM via local.properties (self-hosted Firebase project).
+        // Prefer android/app/google-services.json when present; these fields
+        // enable FirebaseApp manual init as a drop-in alternative.
+        buildConfigField("String", "FCM_API_KEY", "\"${lp("firebase.api_key")}\"")
+        buildConfigField("String", "FCM_APP_ID", "\"${lp("firebase.app_id")}\"")
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${lp("firebase.project_id")}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${lp("firebase.gcm_sender_id")}\"")
+        buildConfigField("String", "FCM_DEFAULT_WEB_CLIENT_ID", "\"${lp("firebase.default_web_client_id")}\"")
     }
 
     signingConfigs {
@@ -138,4 +146,11 @@ dependencies {
     androidTestImplementation(libs.truth)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+// Standard FCM path: drop google-services.json into android/app/ (gitignored)
+// and the plugin generates Firebase resources. Without the file the build
+// stays green; PushManager can still init Firebase from local.properties.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
