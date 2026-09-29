@@ -1,10 +1,10 @@
 # NineBot+
 
-NineBot+ is a personal client for viewing and managing Ninebot vehicle status. It talks to a **NinePlus Platform** server (server-only architecture) and provides dashboards, widgets, trip history, and local ride recording.
+NineBot+ is a personal iOS and Android client for viewing and managing Ninebot vehicle status. Both clients use a **NinePlus Platform** server for the shared HTTP+JSON contract and provide dashboards, widgets, trip history, and local ride recording.
 
 Telegram: https://t.me/ninebotultra
 
-> **Branch notice:** `main` is server-only and no longer includes the dual-mode connection path. Use the `nine-proxy` branch when dual-mode support is required.
+The `main` branch is the integrated project baseline for the iOS and Android clients. The NinePlus Platform service remains a separate deployment concern; clients do not connect to Ninebot cloud directly.
 
 ## Clients
 
@@ -19,7 +19,7 @@ Telegram: https://t.me/ninebotultra
 - Multi-vehicle switch.
 - Vehicle controls: ring bell, open seat bucket, engine start/stop.
 - Trip history, mileage trends, local ride recording.
-- Map with GCJ-02 coordinate transform for mainland China.
+- Vehicle location maps and coordinate handling appropriate to each client's map provider.
 - Home screen widgets.
 - Charging notifications / live status.
 - Local cache with offline fallback.
