@@ -1,6 +1,8 @@
 package com.example.ninebotplus.ui.map
 
 import android.view.MotionEvent
+import android.view.View
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,34 +35,53 @@ import com.example.ninebotplus.util.CoordinateTransform
 private const val TAG = "NinePlusMap"
 
 /**
- * Creates an AMap MapView with Compose lifecycle.
+ * Host container: [MapView] + optional Android click overlay.
  *
- * AMap 的 nativeDestroy 在 GL 线程上是竞态的：composition 一离开就立刻
- * onDestroy 会 SIGABRT（Pointer tag truncated）。因此：
- * - 实例只创建一次（不把手势开关当 key，避免反复 new）
- * - 隐私合规在 getMap/onCreate 前再确权一次
- * - onDestroy 延迟到下帧，给 GL 线程收尾
+ * MapView 是 SurfaceView，在模拟器/部分机型上会吞掉 Compose 覆盖层的点击。
+ * compact 预览需要「点一下打开全屏」时，在 MapView 之上加一层真正的
+ * Android View 承接点击。
+ *
+ * 生命周期：onCreate/onResume；离开时 onPause + 下一帧 onDestroy（避开 GL 竞态）。
+ */
+private class AmapViewContainer(context: android.content.Context) : FrameLayout(context) {
+    val mapView: MapView = MapView(context)
+    val clickOverlay: View = View(context)
+
+    init {
+        addView(mapView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(clickOverlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        clickOverlay.visibility = View.GONE
+    }
+
+    /** Show an Android view above MapView so taps open the parent action (SurfaceView eats Compose clicks). */
+    fun setPreviewClickThrough(enabled: Boolean, onClick: (() -> Unit)?) {
+        clickOverlay.visibility = if (enabled) View.VISIBLE else View.GONE
+        clickOverlay.isClickable = enabled
+        clickOverlay.isFocusable = enabled
+        clickOverlay.setOnClickListener(
+            if (enabled) {
+                View.OnClickListener { onClick?.invoke() }
+            } else {
+                null
+            },
+        )
+    }
+}
+
+/**
+ * Creates an AMap map host with Compose lifecycle.
  */
 @Composable
-private fun rememberAmapView(passThroughTouch: Boolean = false): MapView {
+private fun rememberAmapView(
+    passThroughTouch: Boolean = false,
+    onSurfaceClick: (() -> Unit)? = null,
+): AmapViewContainer {
     val context = LocalContext.current.applicationContext
-    val mapView = remember {
-        object : MapView(context) {
-            @Volatile
-            var passTouch = false
+    val container = remember { AmapViewContainer(context) }
+    container.setPreviewClickThrough(passThroughTouch, onSurfaceClick)
 
-            override fun onTouchEvent(event: MotionEvent?): Boolean {
-                return if (passTouch) false else super.onTouchEvent(event)
-            }
-
-            override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-                return if (passTouch) false else super.dispatchTouchEvent(ev)
-            }
-        }
-    }
-    mapView.passTouch = passThroughTouch
-
-    DisposableEffect(mapView) {
+    DisposableEffect(container) {
+        val mapView = container.mapView
         try {
             com.amap.api.maps.MapsInitializer.updatePrivacyShow(context, true, true)
             com.amap.api.maps.MapsInitializer.updatePrivacyAgree(context, true)
@@ -75,8 +96,7 @@ private fun rememberAmapView(passThroughTouch: Boolean = false): MapView {
             } catch (e: Exception) {
                 android.util.Log.w(TAG, "amap MapView pause", e)
             }
-            // Defer onDestroy: immediate destroy races GLThread.nativeDestroy.
-            mapView.post {
+            container.post {
                 try {
                     mapView.onDestroy()
                 } catch (e: Exception) {
@@ -85,7 +105,7 @@ private fun rememberAmapView(passThroughTouch: Boolean = false): MapView {
             }
         }
     }
-    return mapView
+    return container
 }
 
 private fun AMap.applyChinaChrome(interactive: Boolean = true) {
@@ -112,6 +132,7 @@ fun VehicleLocationMap(
     modifier: Modifier = Modifier,
     privacyEnabled: Boolean = false,
     compact: Boolean = false,
+    onPreviewClick: (() -> Unit)? = null,
 ) {
     if (privacyEnabled) {
         Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -125,14 +146,17 @@ fun VehicleLocationMap(
     val gcj = remember(latitude, longitude) {
         MapProviderConfig.toMapCoordinate(latitude, longitude)
     }
-    val mapView = rememberAmapView(passThroughTouch = compact)
+    val mapHost = rememberAmapView(
+        passThroughTouch = compact,
+        onSurfaceClick = if (compact) onPreviewClick else null,
+    )
 
     Box(modifier = modifier) {
         AndroidView(
-            factory = { mapView },
+            factory = { mapHost },
             modifier = Modifier.fillMaxSize(),
         ) { view ->
-            val amap = view.map ?: return@AndroidView
+            val amap = view.mapView.map ?: return@AndroidView
             amap.applyChinaChrome(interactive = !compact)
             amap.clear()
             val target = LatLng(gcj.latitude, gcj.longitude)
@@ -204,14 +228,14 @@ fun RideTrackMap(
     val gcjPoints = remember(points) {
         points.map { MapProviderConfig.toMapCoordinate(it.latitude, it.longitude) }
     }
-    val mapView = rememberAmapView()
+    val mapHost = rememberAmapView(passThroughTouch = false)
 
     Box(modifier = modifier) {
         AndroidView(
-            factory = { mapView },
+            factory = { mapHost },
             modifier = Modifier.fillMaxSize(),
         ) { view ->
-            val amap = view.map ?: return@AndroidView
+            val amap = view.mapView.map ?: return@AndroidView
             amap.applyChinaChrome(interactive = true)
             amap.clear()
 
