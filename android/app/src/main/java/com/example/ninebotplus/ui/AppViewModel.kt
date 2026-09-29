@@ -86,9 +86,10 @@ class AppViewModel(
         viewModelScope.launch {
             repository.initialize()
             val configuration = repository.configuration()
-            _baseBaseUrl.value = configuration.baseUrlString
-            _bearerToken.value = configuration.bearerToken
-            _account.value = repository.loginResult.value?.phone.orEmpty()
+            _baseBaseUrl.value = configuration.baseUrlString.ifBlank { DebugLoginDefaults.server }
+            _bearerToken.value = configuration.bearerToken.ifBlank { DebugLoginDefaults.bearer }
+            _account.value = repository.loginResult.value?.phone
+                ?: DebugLoginDefaults.phone
             refreshLocalCaches()
             autoRefreshIfPossible()
         }
