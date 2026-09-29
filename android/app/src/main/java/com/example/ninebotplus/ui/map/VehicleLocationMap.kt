@@ -34,32 +34,55 @@ private const val TAG = "NinePlusMap"
 
 /**
  * Creates an AMap MapView with Compose lifecycle.
- * Uses MapView (GLSurfaceView) for maximum EGLContext compatibility across emulators.
  *
- * [passThroughTouch] lets parent Compose clickable receive taps (map view
- * otherwise swallows them even when gestures are disabled).
+ * AMap 的 nativeDestroy 在 GL 线程上是竞态的：composition 一离开就立刻
+ * onDestroy 会 SIGABRT（Pointer tag truncated）。因此：
+ * - 实例只创建一次（不把手势开关当 key，避免反复 new）
+ * - 隐私合规在 getMap/onCreate 前再确权一次
+ * - onDestroy 延迟到下帧，给 GL 线程收尾
  */
 @Composable
 private fun rememberAmapView(passThroughTouch: Boolean = false): MapView {
     val context = LocalContext.current.applicationContext
-    val mapView = remember(passThroughTouch) {
+    val mapView = remember {
         object : MapView(context) {
+            @Volatile
+            var passTouch = false
+
             override fun onTouchEvent(event: MotionEvent?): Boolean {
-                return if (passThroughTouch) false else super.onTouchEvent(event)
+                return if (passTouch) false else super.onTouchEvent(event)
             }
 
             override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-                return if (passThroughTouch) false else super.dispatchTouchEvent(ev)
+                return if (passTouch) false else super.dispatchTouchEvent(ev)
             }
-        }.apply {
-            onCreate(null)
-            onResume()
         }
     }
+    mapView.passTouch = passThroughTouch
+
     DisposableEffect(mapView) {
+        try {
+            com.amap.api.maps.MapsInitializer.updatePrivacyShow(context, true, true)
+            com.amap.api.maps.MapsInitializer.updatePrivacyAgree(context, true)
+            mapView.onCreate(null)
+            mapView.onResume()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "amap MapView init failed", e)
+        }
         onDispose {
-            mapView.onPause()
-            mapView.onDestroy()
+            try {
+                mapView.onPause()
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "amap MapView pause", e)
+            }
+            // Defer onDestroy: immediate destroy races GLThread.nativeDestroy.
+            mapView.post {
+                try {
+                    mapView.onDestroy()
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "amap MapView destroy", e)
+                }
+            }
         }
     }
     return mapView

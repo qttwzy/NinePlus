@@ -42,13 +42,14 @@ class NinePlusApp : Application() {
     }
 
     override fun onCreate() {
+        // 高德合规：任何 SDK 调用之前（含 super.onCreate 链路）完成隐私同意。
+        initAmapPrivacy()
         super.onCreate()
         settingsStore = SettingsStore(this)
         repository = VehicleRepository(this, settingsStore, NinePlusDatabase.get(this))
         pushManager = PushManager(this, repository)
         createNotificationChannels()
         com.example.ninebotplus.location.DashboardRefreshWorker.schedule(this)
-        initAmapPrivacy()
     }
 
     /** 高德 SDK 合规：必须在创建 MapView 前完成隐私同意。 */
