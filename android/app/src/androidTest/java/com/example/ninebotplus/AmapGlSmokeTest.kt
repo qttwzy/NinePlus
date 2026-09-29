@@ -35,4 +35,23 @@ class AmapGlSmokeTest {
             }
         }
     }
+
+    @Test
+    fun amapMapViewCreateDestroyCycleDoesNotAbort() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        MapsInitializer.updatePrivacyShow(context, true, true)
+        MapsInitializer.updatePrivacyAgree(context, true)
+
+        // Tab switches dispose/recreate map views — this is the production crash path.
+        repeat(3) {
+            val mapView = com.amap.api.maps.MapView(context)
+            mapView.onCreate(null)
+            mapView.onResume()
+            assertThat(mapView.map).isNotNull()
+            mapView.onPause()
+            Thread.sleep(200)
+            mapView.onDestroy()
+            Thread.sleep(150)
+        }
+    }
 }
