@@ -77,29 +77,6 @@ private fun AMap.applyChinaChrome(interactive: Boolean = true) {
     }
 }
 
-/** No-GL placeholder when AMap cannot run (emulator / missing EGL). */
-@Composable
-private fun MapGlFallback(modifier: Modifier, compact: Boolean, title: String) {
-    android.util.Log.i(TAG, "map GL fallback (no AMap MapView): $title")
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "地图引擎不可用",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = if (compact) 10.sp else 12.sp,
-                )
-                Text(
-                    if (compact) "请在真机查看" else "模拟器无 OpenGL 兼容环境，真机可显示高德地图 · $title",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = if (compact) 8.sp else 11.sp,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
-    }
-}
-
 /**
  * Vehicle location map (高德官方 3D 地图 SDK).
  * Coordinates are raw WGS-84; [MapProviderConfig.toMapCoordinate] converts to GCJ-02 once.
@@ -119,13 +96,6 @@ fun VehicleLocationMap(
                 Text("位置已隐藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        return
-    }
-
-    // AMap GL thread crashes the process on emulators (EGL createContext failed).
-    // Never inflate AMap MapView there — render a static card instead.
-    if (!AmapSupport.shouldRenderAmap()) {
-        MapGlFallback(modifier = modifier, compact = compact, title = title)
         return
     }
 
@@ -205,11 +175,6 @@ fun RideTrackMap(
                 Text("这条记录没有轨迹点", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        return
-    }
-
-    if (!AmapSupport.shouldRenderAmap()) {
-        MapGlFallback(modifier = modifier, compact = false, title = "轨迹 ${points.size} 点")
         return
     }
 
