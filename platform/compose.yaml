@@ -1,0 +1,24 @@
+services:
+  nineplus:
+    image: ghcr.io/wuchiawuchi/nineplus-ha-server:latest
+    container_name: nineplus
+    restart: unless-stopped
+    ports:
+      - "19009:19009"
+    environment:
+      NINEBOT_USERNAME: "${NINEBOT_USERNAME:-}"
+      NINEBOT_PASSWORD: "${NINEBOT_PASSWORD:-}"
+      NINEBOT_PASSWORD_B64: "${NINEBOT_PASSWORD_B64:-}"
+      NINEBOT_CONFIG_DIR: "/data/ninebot"
+      NINEPLUS_ACCOUNTS: "/data/ninebot/accounts.json"
+      NINEPLUS_ADMIN_PASSWORD: "${NINEPLUS_ADMIN_PASSWORD:-}"
+      NINEPLUS_ADMIN_PASSWORD_B64: "${NINEPLUS_ADMIN_PASSWORD_B64:-}"
+      NINEPLUS_BEARER_TOKEN: "${NINEPLUS_BEARER_TOKEN:-}"
+      NINEPLUS_ACCOUNT: "${NINEPLUS_ACCOUNT:-homeassistant}"
+      NINEPLUS_PASSWORD: "${NINEPLUS_PASSWORD:-}"
+      NINEPLUS_PASSWORD_B64: "${NINEPLUS_PASSWORD_B64:-}"
+    volumes:
+      - ninebot-data:/data/ninebot
+
+volumes:
+  ninebot-data:
