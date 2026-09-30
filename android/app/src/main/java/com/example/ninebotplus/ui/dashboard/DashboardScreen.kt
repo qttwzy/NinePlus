@@ -215,7 +215,7 @@ fun DashboardScreen(viewModel: AppViewModel) {
     if (showRangeInfo) {
         AlertDialog(
             onDismissRequest = { showRangeInfo = false },
-            title = { Text("算法预估") },
+            title = { Text("续航说明") },
             text = {
                 Text(vehicle.state.localEstimateBasisText + "\n\n" + vehicle.state.rangeModelInsightText)
             },
@@ -321,16 +321,46 @@ private fun HeroSection(
 
             Spacer(Modifier.height(14.dp))
 
-            Text(
-                state.localEstimatedMileageText,
-                style = MaterialTheme.typography.displayLarge.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 44.sp,
-                ),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        state.officialEstimatedMileageText,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 28.sp,
+                        ),
+                    )
+                    Text(
+                        "官方预估",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        state.preciseEstimateMileageText,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 28.sp,
+                        ),
+                    )
+                    Text(
+                        "精准续航",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    state.predictionModelTitle,
+                    "预计可行驶",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -352,7 +382,6 @@ private fun HeroSection(
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 MetricCell("电量", state.batteryText, Icons.Default.Bolt)
-                MetricCell("官方预估", state.officialEstimatedMileageText, Icons.Default.Place)
                 MetricCell("均速", state.averageSpeedText, Icons.Default.ElectricBolt)
             }
 

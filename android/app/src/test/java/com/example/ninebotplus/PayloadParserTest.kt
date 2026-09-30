@@ -59,6 +59,7 @@ class PayloadParserTest {
             """
             {"status":{
               "dump_energy":86,
+              "estimate_mileage":40.0,
               "precise_estimate_mileage":42.5,
               "charging":0,
               "pwr":1,
@@ -79,7 +80,9 @@ class PayloadParserTest {
         val battery = json("""{"battery_list":[{"bms_volt":52300,"bat_temp":285,"bms_cycle":36}]}""")
         val state = PayloadParser.vehicleState(status, travel, battery, null, java.util.Date())
         assertThat(state.battery).isEqualTo(86)
-        assertThat(state.endurance).isEqualTo(42.5)
+        assertThat(state.estimateMileage).isEqualTo(40.0)
+        assertThat(state.preciseEstimateMileage).isEqualTo(42.5)
+        assertThat(state.preferredOfficialRange).isEqualTo(42.5)
         assertThat(state.isPoweredOn).isTrue()
         assertThat(state.isLocked).isTrue()
         assertThat(state.monthMileage).isEqualTo(128.4)
@@ -88,6 +91,25 @@ class PayloadParserTest {
         // lat/lon scaled from 1e6 integers
         assertThat(state.latitude).isWithin(0.01).of(31.2304)
         assertThat(state.longitude).isWithin(0.01).of(121.4737)
+    }
+
+    @Test
+    fun `vehicle state keeps estimate and precise independent`() {
+        val status = json(
+            """{"status":{"dump_energy":50,"estimate_mileage":18.0}}""",
+        )
+        val onlyEstimate = PayloadParser.vehicleState(status, null, null, null, java.util.Date())
+        assertThat(onlyEstimate.estimateMileage).isEqualTo(18.0)
+        assertThat(onlyEstimate.preciseEstimateMileage).isNull()
+        assertThat(onlyEstimate.preferredOfficialRange).isEqualTo(18.0)
+
+        val preciseOnly = json(
+            """{"status":{"dump_energy":50,"precise_estimate_mileage":22.0}}""",
+        )
+        val state = PayloadParser.vehicleState(preciseOnly, null, null, null, java.util.Date())
+        assertThat(state.estimateMileage).isNull()
+        assertThat(state.preciseEstimateMileage).isEqualTo(22.0)
+        assertThat(state.preferredOfficialRange).isEqualTo(22.0)
     }
 
     @Test

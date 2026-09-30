@@ -127,22 +127,13 @@ struct NinebotServerClient {
                 battery = fallbackBattery
                 prediction = try? await fetchPrediction(sn: vehicle.sn)
             }
-            let monthlyTravels = await fetchMonthlyTravels(
-                sn: vehicle.sn,
-                authDate: vehicle.authDate,
-                currentMonth: currentMonth,
-                currentTravel: travel
-            )
-            var state = Self.vehicleState(
+            let state = Self.vehicleState(
                 status: status,
                 travel: travel,
                 battery: battery,
                 prediction: prediction,
                 updatedAt: Self.serverDateValue(dashboardObject?["updated_at"] ?? dashboardObject?["updatedAt"]) ?? Date()
             )
-            if let totalMileage = Self.totalMileage(fromMonthlyTravels: monthlyTravels) {
-                state.totalMileage = totalMileage
-            }
             let dashboardVehicle = dashboardObject?["vehicle"].flatMap(Self.vehicleInfo) ?? vehicle
             let resolvedVehicle = Self.vehicleInfo(dashboardVehicle, addingImageFrom: status, battery: battery)
             snapshots.append(NinebotVehicleSnapshot(vehicle: resolvedVehicle, state: state))
@@ -197,36 +188,14 @@ struct NinebotServerClient {
         )
     }
 
+    /// 单月行程列表；历史月按需拉取，不参与 dashboard 热路径。
+    func fetchTravelMonth(sn: String, month: String) async throws -> JSONValue {
+        try await fetchTravel(sn: sn, month: month)
+    }
+
     private func fetchPrediction(sn: String) async throws -> NinebotServerPrediction? {
         let payload = try await request(method: "GET", path: ["vehicles", sn, "prediction"])
         return Self.serverPrediction(from: payload)
-    }
-
-    private func fetchMonthlyTravels(
-        sn: String,
-        authDate: Date?,
-        currentMonth: String,
-        currentTravel: JSONValue?
-    ) async -> [JSONValue]? {
-        let months = Self.monthStrings(from: authDate, through: Date())
-        guard !months.isEmpty else {
-            return currentTravel.map { [$0] }
-        }
-
-        var payloads: [JSONValue] = []
-        for month in months {
-            if month == currentMonth, let currentTravel {
-                payloads.append(currentTravel)
-                continue
-            }
-
-            do {
-                payloads.append(try await fetchTravel(sn: sn, month: month))
-            } catch {
-                return nil
-            }
-        }
-        return payloads
     }
 
     func registerPushDevice(token: String, bundleID: String, environment: String) async throws {
@@ -337,7 +306,7 @@ struct NinebotServerClient {
     }
 }
 
-private extension NinebotServerClient {
+extension NinebotServerClient {
     static func unwrapEnvelope(_ root: JSONValue) throws -> JSONValue {
         guard let object = root.objectValue, object.keys.contains("ok") else {
             return root
@@ -629,7 +598,8 @@ private extension NinebotServerClient {
             ),
             batteryCycleCount: firstInt(["bms_cycle", "bmsCycle", "cycle", "cycles"], in: batterySources),
             chargingPower: firstDouble(["charging_power", "chargingPower", "charge_power", "chargePower"], in: batterySources),
-            endurance: firstDouble(["estimate_mileage", "estimateMileage", "precise_estimate_mileage", "preciseEstimateMileage"], in: statusSources),
+            estimateMileage: firstDouble(["estimate_mileage", "estimateMileage"], in: statusSources),
+            preciseEstimateMileage: firstDouble(["precise_estimate_mileage", "preciseEstimateMileage"], in: statusSources),
             aiEstimatedMileage: firstDouble(["ai_estimate_mileage", "aiEstimateMileage", "ai_estimated_mileage", "aiEstimatedMileage"], in: statusSources),
             isCharging: firstBoolLike(["charging", "chargingState"], in: batterySources, trueValue: 1),
             isPoweredOn: firstBoolLike(["pwr", "powerStatus"], in: statusSources, trueValue: 1),
@@ -726,29 +696,6 @@ private extension NinebotServerClient {
                 mileage: mileage
             )
         }
-    }
-
-    static func totalMileage(fromMonthlyTravels travels: [JSONValue]?) -> Double? {
-        guard let travels else { return nil }
-        var total = 0.0
-        var hasMileage = false
-
-        for travel in travels {
-            guard let object = travel.objectValue else { continue }
-            if let mileage = firstDouble(["total_mileages", "totalMileage", "monthMileage", "mileage"], in: object) {
-                total += max(mileage, 0)
-                hasMileage = true
-                continue
-            }
-
-            let dailyTotal = dailyMileageRecords(from: object).reduce(0) { $0 + max($1.mileage, 0) }
-            if dailyTotal > 0 {
-                total += dailyTotal
-                hasMileage = true
-            }
-        }
-
-        return hasMileage ? total : nil
     }
 
     static func firstInt(_ keys: [String], in object: [String: JSONValue]) -> Int? {

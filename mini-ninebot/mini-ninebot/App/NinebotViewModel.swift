@@ -146,6 +146,7 @@ final class NinebotViewModel: ObservableObject {
     @Published private(set) var rideDetails: [String: NinebotRideDetail] = [:]
     @Published private(set) var loadingRideDetailKeys: Set<String> = []
     @Published private(set) var syncingTravelMonth: String?
+    private var loadedTravelMonths = Set<String>()
 
     private let store = NinebotSharedStore()
     private var lastAutomaticRefreshAt: Date?
@@ -279,11 +280,6 @@ final class NinebotViewModel: ObservableObject {
             let page = try await client.syncTravelMonth(sn: vehicleSN, month: month, pageSize: 100)
             self.store.upsertInterfaceRideRecords(page.records, sn: vehicleSN)
 
-            let dashboard = try await client.fetchDashboard(selectedSN: vehicleSN)
-            let archivedDashboard = self.saveDashboard(dashboard)
-            await self.cacheVehicleImages(for: archivedDashboard)
-            await self.refreshResolvedAddressesIfNeeded(for: archivedDashboard)
-
             if page.total == 0 {
                 self.statusMessage = "\(Self.displayMonth(month)) 暂无行程"
             } else {
@@ -291,6 +287,47 @@ final class NinebotViewModel: ObservableObject {
             }
             self.errorMessage = nil
             WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
+    /// 行程页懒加载：进入某月时若本地无数据则拉取一次。
+    func ensureTravelMonth(vehicleSN: String, month: String) async {
+        let existing = store.interfaceRideRecords(sn: vehicleSN).filter { record in
+            let date = record.startedAt ?? record.endedAt
+            guard let date else { return false }
+            return NinebotServerClient.monthString(for: date) == month
+        }
+        if !existing.isEmpty { return }
+        guard loadedTravelMonths.insert("\(vehicleSN)|\(month)").inserted else { return }
+        do {
+            let client = try makeClient()
+            let payload = try await client.fetchTravelMonth(sn: vehicleSN, month: month)
+            let page = NinebotServerClient.travelPage(from: payload, fallbackMonth: month)
+            self.store.upsertInterfaceRideRecords(page.records, sn: vehicleSN)
+            self.errorMessage = nil
+        } catch {
+            self.errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 「获取更早」：强制拉取某月行程，不触发完整 dashboard 刷新。
+    func loadTravelMonth(vehicleSN: String, month: String) async {
+        await runLoadingOperation(message: "正在获取 \(Self.displayMonth(month)) 行程") {
+            self.syncingTravelMonth = month
+            defer { self.syncingTravelMonth = nil }
+
+            let client = try makeClient()
+            let payload = try await client.fetchTravelMonth(sn: vehicleSN, month: month)
+            let page = NinebotServerClient.travelPage(from: payload, fallbackMonth: month)
+            self.store.upsertInterfaceRideRecords(page.records, sn: vehicleSN)
+            _ = loadedTravelMonths.insert("\(vehicleSN)|\(month)")
+
+            if page.records.isEmpty {
+                self.statusMessage = "\(Self.displayMonth(month)) 暂无行程"
+            } else {
+                self.statusMessage = "已获取 \(Self.displayMonth(month)) \(page.records.count) 条行程"
+            }
+            self.errorMessage = nil
         }
     }
 
@@ -411,6 +448,10 @@ final class NinebotViewModel: ObservableObject {
             guard let sn else { return true }
             return ride.vehicleSN == nil || ride.vehicleSN == sn
         }
+    }
+
+    func interfaceRides(for sn: String) -> [NinebotRideRecord] {
+        store.interfaceRideRecords(sn: sn)
     }
 
     func recordedRide(associatedWith rideID: String, vehicleSN: String?) -> NinebotRecordedRide? {
@@ -543,6 +584,9 @@ final class NinebotViewModel: ObservableObject {
 
     private func cacheVehicleImages(for dashboard: NinebotDashboard) async {
         for snapshot in dashboard.vehicles {
+            if let cached = store.loadVehicleImageData(sn: snapshot.vehicle.sn), !cached.isEmpty {
+                continue
+            }
             guard let urlString = snapshot.vehicle.imageURLString?.trimmed,
                   !urlString.isEmpty,
                   let url = URL(string: urlString) else {
