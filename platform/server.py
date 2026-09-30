@@ -19,11 +19,32 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from snapshot_cache import (
+    TTL_BATTERY,
+    TTL_DASHBOARD,
+    TTL_STATUS,
+    TTL_TRAVEL_CURRENT,
+    TTL_TRAVEL_DETAIL,
+    TTL_TRAVEL_HISTORICAL,
+    TTL_VEHICLES,
+    CommandAudit,
+    RequestCoalescer,
+    SnapshotStore,
+    iso,
+)
 
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = _env(name)
+    if not raw:
+        return default
+    return raw.lower() not in {"0", "false", "no", "off"}
 
 
 def _secret_env(name: str, legacy_name: str) -> str:
@@ -46,6 +67,8 @@ class Settings:
     ninebot_config_dir: Path = Path("/data/ninebot")
     accounts_path: Path = Path("/data/ninebot/accounts.json")
     admin_password: str = ""
+    buffer_enabled: bool = True
+    snapshot_db_path: Path = Path("/data/ninebot/snapshots.db")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -58,6 +81,8 @@ class Settings:
             ninebot_config_dir=Path(_env("NINEBOT_CONFIG_DIR", "/data/ninebot")),
             accounts_path=Path(_env("NINEPLUS_ACCOUNTS", "/data/ninebot/accounts.json")),
             admin_password=_secret_env("NINEPLUS_ADMIN_PASSWORD_B64", "NINEPLUS_ADMIN_PASSWORD") or _secret_env("NINEPLUS_PASSWORD_B64", "NINEPLUS_PASSWORD"),
+            buffer_enabled=_env_bool("NINEPLUS_BUFFER_ENABLED", True),
+            snapshot_db_path=Path(_env("NINEPLUS_SNAPSHOT_DB", "/data/ninebot/snapshots.db")),
         )
 
 
@@ -269,6 +294,14 @@ class DirectNinebotClient:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def status_only(self, sn: str) -> dict[str, Any]:
+        payload = self.run("status", sn)
+        return payload if isinstance(payload, dict) else {}
+
+    def battery_only(self, sn: str) -> dict[str, Any]:
+        payload = self.run("battery", sn)
+        return payload if isinstance(payload, dict) else {}
+
     def travel(self, sn: str, month: str) -> dict[str, Any]:
         payload = self.run("travel", sn, "--month", month)
         return payload if isinstance(payload, dict) else {"month": month, "list": []}
@@ -292,14 +325,214 @@ class DirectNinebotClient:
         return self.run(*command)
 
 
+class BufferedNinebotClient:
+    """Read-path cache + single-flight around DirectNinebotClient.
+
+    Buffer failures fall through to the direct path. `NINEPLUS_BUFFER_ENABLED=0`
+    restores pure direct behavior.
+    """
+
+    def __init__(
+        self,
+        inner: DirectNinebotClient,
+        account_id: str,
+        store: SnapshotStore,
+        coalescer: RequestCoalescer,
+        commands: CommandAudit,
+        enabled: bool = True,
+    ):
+        self.inner = inner
+        self.account_id = account_id
+        self.store = store
+        self.coalescer = coalescer
+        self.commands = commands
+        self.enabled = enabled and store.enabled
+        self.last_meta: dict[str, Any] = {}
+
+    @property
+    def settings(self) -> Settings:
+        return self.inner.settings
+
+    def _meta(self, hit: Any) -> dict[str, Any]:
+        meta = {
+            "fetched_at": getattr(hit, "fetched_at", iso()) if hit else iso(),
+            "source_updated_at": getattr(hit, "source_updated_at", None),
+            "stale": bool(getattr(hit, "stale", False)),
+            "buffered": bool(hit),
+        }
+        self.last_meta = meta
+        return meta
+
+    def _read(
+        self,
+        vehicle_sn: str,
+        data_type: str,
+        ttl: int,
+        fetch: Callable[[], Any],
+    ) -> tuple[Any, dict[str, Any]]:
+        if not self.enabled:
+            payload = fetch()
+            self._meta(None)
+            return payload, self.last_meta
+        hit = self.store.get(self.account_id, vehicle_sn, data_type)
+        if hit is not None and not hit.stale:
+            self._meta(hit)
+            return hit.payload, self.last_meta
+
+        key = f"{self.account_id}|{vehicle_sn}|{data_type}"
+
+        def load() -> Any:
+            return fetch()
+
+        try:
+            payload = self.coalescer.run(key, load)
+        except Exception:
+            if hit is not None:
+                # Keep last known good; mark stale so clients can show freshness.
+                self._meta(hit)
+                self.last_meta = dict(self.last_meta, stale=True, buffered=True)
+                return hit.payload, self.last_meta
+            raise
+        fresh = self.store.get(self.account_id, vehicle_sn, data_type)
+        if fresh is not None and not fresh.stale and fresh.payload == payload:
+            self._meta(fresh)
+        else:
+            stored = self.store.put(
+                self.account_id, vehicle_sn, data_type, payload, ttl,
+                source_updated_at=_source_updated_at(payload),
+            )
+            self._meta(stored)
+        return payload, self.last_meta
+
+    def _read_stale_ok(
+        self,
+        vehicle_sn: str,
+        data_type: str,
+        ttl: int,
+        fetch: Callable[[], Any],
+    ) -> tuple[Any, dict[str, Any]]:
+        """Fresh → return; stale → return immediately and refresh in background; miss → bounded sync."""
+        if not self.enabled:
+            return self._read(vehicle_sn, data_type, ttl, fetch)
+        hit = self.store.get(self.account_id, vehicle_sn, data_type)
+        if hit is not None and not hit.stale:
+            self._meta(hit)
+            return hit.payload, self.last_meta
+        if hit is not None and hit.stale:
+            self._meta(hit)
+
+            def refresh() -> None:
+                try:
+                    payload = fetch()
+                    self.store.put(
+                        self.account_id, vehicle_sn, data_type, payload, ttl,
+                        source_updated_at=_source_updated_at(payload),
+                    )
+                except Exception as exc:  # noqa: BLE001 - background refresh must not crash
+                    print(f"background refresh failed {data_type}/{vehicle_sn}: {exc}", file=sys.stderr)
+
+            threading.Thread(target=refresh, name=f"swr-{data_type}", daemon=True).start()
+            return hit.payload, self.last_meta
+        return self._read(vehicle_sn, data_type, ttl, fetch)
+
+    def vehicles(self) -> list[dict[str, Any]]:
+        payload, _ = self._read("*", "vehicles", TTL_VEHICLES, self.inner.vehicles)
+        return payload if isinstance(payload, list) else []
+
+    def ensure_vehicle(self, sn: str) -> None:
+        if not any(str(v.get("wnumber") or v.get("sn")) == sn for v in self.vehicles()):
+            raise KeyError(sn)
+
+    def dashboard(self, sn: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        month = datetime.now().strftime("%Y%m")
+        status, status_meta = self._read_stale_ok(sn, "status", TTL_STATUS, lambda: self.inner.status_only(sn))
+        battery, _ = self._read_stale_ok(sn, "battery", TTL_BATTERY, lambda: self.inner.battery_only(sn))
+        travel, _ = self._read_stale_ok(
+            sn, f"travel:{month}", TTL_TRAVEL_CURRENT,
+            lambda: self.inner.travel(sn, month),
+        )
+        vehicles = self.vehicles()
+        vehicle = next(
+            (v for v in vehicles if str(v.get("wnumber") or v.get("sn")) == sn),
+            {"sn": sn, "wnumber": sn},
+        )
+        payload = {
+            "vehicle": vehicle,
+            "status": status,
+            "battery": battery,
+            "travel": travel,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return payload, {
+            "fetched_at": status_meta.get("fetched_at", iso()),
+            "source_updated_at": status_meta.get("source_updated_at"),
+            "stale": bool(status_meta.get("stale")),
+            "buffered": True,
+        }
+
+    def status_only(self, sn: str) -> dict[str, Any]:
+        payload, _ = self._read_stale_ok(sn, "status", TTL_STATUS, lambda: self.inner.status_only(sn))
+        return payload
+
+    def battery_only(self, sn: str) -> dict[str, Any]:
+        payload, _ = self._read_stale_ok(sn, "battery", TTL_BATTERY, lambda: self.inner.battery_only(sn))
+        return payload
+
+    def travel(self, sn: str, month: str) -> dict[str, Any]:
+        current = datetime.now().strftime("%Y%m")
+        ttl = TTL_TRAVEL_CURRENT if month == current else TTL_TRAVEL_HISTORICAL
+        payload, _ = self._read_stale_ok(sn, f"travel:{month}", ttl, lambda: self.inner.travel(sn, month))
+        return payload
+
+    def travel_detail(self, sn: str, travel_id: str) -> dict[str, Any]:
+        payload, _ = self._read(
+            sn, f"travel_detail:{travel_id}", TTL_TRAVEL_DETAIL,
+            lambda: self.inner.travel_detail(sn, travel_id),
+        )
+        return payload
+
+    def action(self, account_key: str, sn: str, action: str, idempotency_key: str | None = None) -> Any:
+        record = self.commands.begin(account_key, sn, action, idempotency_key)
+        if record.get("replayed"):
+            return {
+                "command_id": record["command_id"],
+                "status": record["status"],
+                "result": record.get("result"),
+                "replayed": True,
+            }
+        command_id = record["command_id"]
+        try:
+            result = self.inner.action(sn, action)
+        except subprocess.TimeoutExpired as exc:
+            self.commands.unknown(command_id, f"timeout: {exc}")
+            raise RuntimeError("车控超时，结果未知，请查看车辆状态后再操作（不会自动重试）") from exc
+        except Exception as exc:  # noqa: BLE001
+            self.commands.fail(command_id, str(exc))
+            raise
+        self.commands.complete(command_id, result)
+        return {"command_id": command_id, "status": "succeeded", "result": result, "replayed": False}
+
+
+def _source_updated_at(payload: Any) -> str | None:
+    if isinstance(payload, dict):
+        for key in ("updated_at", "updatedAt", "source_updated_at", "sourceUpdatedAt"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
 class NinePlusAdapter:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.account_store = AccountStore(settings)
         self._sessions: dict[str, tuple[str, dict[str, Any]]] = {}
-        self._clients: dict[str, DirectNinebotClient] = {}
+        self._clients: dict[str, BufferedNinebotClient] = {}
         self._session_lock = threading.RLock()
         self._admin_sessions: set[str] = set()
+        self.snapshot_store = SnapshotStore(settings.snapshot_db_path)
+        self.coalescer = RequestCoalescer()
+        self.command_audit = CommandAudit(self.snapshot_store)
 
     def login(self, account: str, password: str) -> dict[str, Any] | None:
         record = self.account_store.authenticate(account, password) or {}
@@ -310,7 +543,7 @@ class NinePlusAdapter:
             self._sessions[token] = (account, record)
         return {"phone": account, "session_token": token}
 
-    def client_for_session(self, token: str) -> DirectNinebotClient | None:
+    def client_for_session(self, token: str) -> BufferedNinebotClient | None:
         with self._session_lock:
             session = self._sessions.get(token)
             if not session:
@@ -318,9 +551,22 @@ class NinePlusAdapter:
             account, record = session
             client = self._clients.get(account)
             if client is None:
-                client = DirectNinebotClient(self.account_store.client_settings(record))
+                inner = DirectNinebotClient(self.account_store.client_settings(record))
+                client = BufferedNinebotClient(
+                    inner,
+                    account_id=AccountStore._account_id(account),
+                    store=self.snapshot_store,
+                    coalescer=self.coalescer,
+                    commands=self.command_audit,
+                    enabled=self.settings.buffer_enabled,
+                )
                 self._clients[account] = client
             return client
+
+    def session_account(self, token: str) -> str | None:
+        with self._session_lock:
+            session = self._sessions.get(token)
+            return session[0] if session else None
 
     def new_admin_session(self) -> str:
         token = secrets.token_urlsafe(32)
@@ -363,13 +609,21 @@ class Handler(BaseHTTPRequestHandler):
             return {key: items[-1] for key, items in values.items()}
         return json.loads(raw)
 
-    def _reply(self, status: int, data: Any = None, error: str | None = None) -> None:
-        payload = {"ok": error is None}
+    def _reply(self, status: int, data: Any = None, error: str | None = None, meta: dict[str, Any] | None = None) -> None:
+        payload: dict[str, Any] = {"ok": error is None}
         payload["data" if error is None else "error"] = data if error is None else {"message": error}
+        if error is None and meta:
+            payload["meta"] = meta
+            self._last_meta = meta
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
+        if error is None and meta:
+            if meta.get("stale"):
+                self.send_header("X-NinePlus-Stale", "1")
+            if meta.get("fetched_at"):
+                self.send_header("X-NinePlus-Fetched-At", str(meta["fetched_at"]))
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -516,7 +770,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:
         if parts == ["healthz"] and method == "GET":
             backend = "ninebot-cloud-multi-account"
             account_count = len(self.adapter.account_store.list_accounts())
-            self._reply(HTTPStatus.OK, {"status": "ok", "backend": backend, "accounts": account_count})
+            self._reply(HTTPStatus.OK, {
+                "status": "ok",
+                "backend": backend,
+                "accounts": account_count,
+                "buffer_enabled": self.adapter.settings.buffer_enabled and self.adapter.snapshot_store.enabled,
+            })
             return
         if not self._authorized():
             self._reply(HTTPStatus.UNAUTHORIZED, error="Bearer Token 无效")
@@ -533,25 +792,29 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:
             self._reply(HTTPStatus.UNAUTHORIZED, error="登录会话无效，请重新登录")
             return
         if parts == ["vehicles"] and method == "GET":
-            self._reply(HTTPStatus.OK, {"vehicles": direct_client.vehicles()})
+            vehicles = direct_client.vehicles()
+            self._reply(HTTPStatus.OK, {"vehicles": vehicles}, meta=direct_client.last_meta)
             return
         if len(parts) >= 3 and parts[0] == "vehicles":
             sn, endpoint = parts[1], parts[2]
             if direct_client:
                 direct_client.ensure_vehicle(sn)
-            if method == "GET" and endpoint in {"dashboard", "status", "battery"}:
-                dashboard = direct_client.dashboard(sn)
-                value = dashboard if endpoint == "dashboard" else dashboard["status" if endpoint == "status" else "battery"]
-                self._reply(HTTPStatus.OK, value)
+            if method == "GET" and endpoint == "dashboard":
+                value, meta = direct_client.dashboard(sn)
+                self._reply(HTTPStatus.OK, value, meta=meta)
+                return
+            if method == "GET" and endpoint in {"status", "battery"}:
+                value = direct_client.status_only(sn) if endpoint == "status" else direct_client.battery_only(sn)
+                self._reply(HTTPStatus.OK, value, meta=direct_client.last_meta)
                 return
             if method == "GET" and endpoint == "travel" and len(parts) == 4:
                 travel_id = urllib.parse.unquote(parts[3])
-                self._reply(HTTPStatus.OK, direct_client.travel_detail(sn, travel_id))
+                self._reply(HTTPStatus.OK, direct_client.travel_detail(sn, travel_id), meta=direct_client.last_meta)
                 return
             if method == "GET" and endpoint == "travel":
                 month = urllib.parse.parse_qs(parsed.query).get("month", [datetime.now().strftime("%Y%m")])[0]
                 value = direct_client.travel(sn, month)
-                self._reply(HTTPStatus.OK, value)
+                self._reply(HTTPStatus.OK, value, meta=direct_client.last_meta)
                 return
             if method == "POST" and endpoint == "travel-sync":
                 month = urllib.parse.parse_qs(parsed.query).get("month", [datetime.now().strftime("%Y%m")])[0]
@@ -569,7 +832,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:
             elif method == "POST" and len(parts) == 4 and endpoint == "engine" and parts[3] in {"start", "stop"}:
                 action = f"engine_{parts[3]}"
             if action:
-                self._reply(HTTPStatus.OK, direct_client.action(sn, action))
+                account_key = self.adapter.session_account(self.headers.get("X-NinePlus-Session", "")) or "anonymous"
+                idem = body.get("idempotency_key") or self.headers.get("Idempotency-Key")
+                result = direct_client.action(account_key, sn, action, str(idem) if idem else None)
+                self._reply(HTTPStatus.OK, result)
                 return
         if method == "POST" and tuple(parts) in {("devices", "register"), ("live-activities", "register")}:
             self._reply(HTTPStatus.OK, {"accepted": False, "reason": "APNs is not configured"})

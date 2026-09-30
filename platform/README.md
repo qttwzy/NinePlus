@@ -31,6 +31,36 @@ bash <(curl -fsSL https://raw.githubusercontent.com/wuchiawuchi/nineplus-ha-serv
 - 电池详情与骑行记录
 - 寻车鸣笛、开座桶、启动和熄火
 
+## 读路径缓冲（NPP-22）
+
+源码位于本仓 `platform/`，部署方式与原先独立服务一致。读请求默认走 SQLite 持久快照：
+
+| 数据类型 | 默认 TTL |
+|---|---|
+| vehicles | 10 分钟 |
+| dashboard / status / battery | 90 秒 |
+| 当月 travel | 10 分钟 |
+| 历史月 travel / 行程详情 | 24 小时 |
+
+行为：
+
+- **新鲜快照**直接返回，不触发 ninecli
+- **过期快照**先返回并标记 `stale`，后台刷新（stale-while-revalidate）
+- **无快照**时同步拉取一次；相同账号/车辆/数据类型的并发请求合并为一次上游调用
+- **上游失败**时优先返回最后一次有效快照并标记 stale；无快照则返回错误
+- 响应 envelope 增加 `meta.fetched_at` / `meta.source_updated_at` / `meta.stale`，并带 `X-NinePlus-Stale` 头
+
+环境变量：
+
+```bash
+NINEPLUS_BUFFER_ENABLED=1          # 0 关闭缓冲，回到直连
+NINEPLUS_SNAPSHOT_DB=/data/ninebot/snapshots.db
+```
+
+车控写入 `vehicle_commands` 审计表（`command_id`、幂等键、状态）。危险操作（上电/熄火/开座桶）**超时不自动重试**，结果记为 `unknown`。客户端可传 `Idempotency-Key` 头或 body `idempotency_key`。
+
+**回滚**：设 `NINEPLUS_BUFFER_ENABLED=0` 并重启容器即可回到直连读路径；快照库可保留，不影响回滚。
+
 ## 手工配置
 
 ```bash

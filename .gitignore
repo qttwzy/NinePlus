@@ -14,8 +14,16 @@ build/
 *.xcarchive
 *.ipa
 node_modules/
-platform/
 ninecli-source/
+
+# Platform runtime data (source under platform/ is tracked)
+platform/.env
+platform/.env.*
+platform/**/snapshots.db
+platform/**/snapshots.db-*
+platform/**/tokens.json
+platform/**/accounts.json
+platform/**/push_devices.json
 
 # Signing material
 *.mobileprovision
