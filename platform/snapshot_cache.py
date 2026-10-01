@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,22 @@ class SnapshotHit:
     fetched_at: str
     stale: bool
     error: str | None = None
+
+
+class CacheMetrics:
+    """Small process-local counters for rollout comparison and health checks."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts: Counter[str] = Counter()
+
+    def increment(self, name: str) -> None:
+        with self._lock:
+            self._counts[name] += 1
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._counts)
 
 
 class SnapshotStore:
@@ -244,35 +261,40 @@ class CommandAudit:
         command_id = str(uuid.uuid4())
         requested = iso()
         conn = self._conn()
-        if idempotency_key and conn is not None:
-            with self.store._lock:  # noqa: SLF001 - same store lock
-                row = conn.execute(
-                    "SELECT * FROM vehicle_commands WHERE account_id=? AND idempotency_key=?",
-                    (account_id, idempotency_key),
-                ).fetchone()
-            if row is not None:
-                return {
-                    "command_id": row["command_id"],
-                    "status": row["status"],
-                    "result": json.loads(row["result_json"]) if row["result_json"] else None,
-                    "error": row["error"],
-                    "replayed": True,
-                }
-        if conn is not None:
-            try:
-                with self.store._lock:  # noqa: SLF001
-                    conn.execute(
+        if conn is None:
+            raise RuntimeError("车控审计不可用，命令未发送")
+        try:
+            # Claim and look up a key in one transaction. Losing callers replay
+            # the persisted winner rather than sending another vehicle command.
+            with self.store._lock, conn:  # noqa: SLF001
+                cursor = conn.execute(
                         """
                         INSERT INTO vehicle_commands
                             (command_id, account_id, vehicle_sn, action, idempotency_key,
                              requested_at, status)
                         VALUES (?,?,?,?,?,?,?)
+                        ON CONFLICT DO NOTHING
                         """,
                         (command_id, account_id, vehicle_sn, action, idempotency_key, requested, "accepted"),
-                    )
-                    conn.commit()
-            except sqlite3.Error as exc:
-                print(f"command audit write failed: {exc}", file=__import__("sys").stderr)
+                )
+                if cursor.rowcount == 0:
+                    row = conn.execute(
+                        "SELECT * FROM vehicle_commands WHERE account_id=? AND idempotency_key=?",
+                        (account_id, idempotency_key),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("车控审计冲突，命令未发送")
+                    if row["vehicle_sn"] != vehicle_sn or row["action"] != action:
+                        raise ValueError("幂等键已用于另一车辆或操作")
+                    return {
+                        "command_id": row["command_id"],
+                        "status": row["status"],
+                        "result": json.loads(row["result_json"]) if row["result_json"] else None,
+                        "error": row["error"],
+                        "replayed": True,
+                    }
+        except sqlite3.Error as exc:
+            raise RuntimeError("车控审计写入失败，命令未发送") from exc
         return {
             "command_id": command_id,
             "status": "accepted",

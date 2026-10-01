@@ -1,6 +1,6 @@
 services:
   nineplus:
-    image: ghcr.io/wuchiawuchi/nineplus-ha-server:latest
+    image: ghcr.io/qttwzy/ninebot-plus-plus-platform:latest
     container_name: nineplus
     restart: unless-stopped
     ports:
@@ -17,6 +17,8 @@ services:
       NINEPLUS_ACCOUNT: "${NINEPLUS_ACCOUNT:-homeassistant}"
       NINEPLUS_PASSWORD: "${NINEPLUS_PASSWORD:-}"
       NINEPLUS_PASSWORD_B64: "${NINEPLUS_PASSWORD_B64:-}"
+      NINEPLUS_BUFFER_ENABLED: "${NINEPLUS_BUFFER_ENABLED:-1}"
+      NINEPLUS_SNAPSHOT_DB: "/data/ninebot/snapshots.db"
     volumes:
       - ninebot-data:/data/ninebot
 

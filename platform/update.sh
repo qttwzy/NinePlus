@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="${NINEPLUS_DIR:-$PWD}"
-REPO_RAW="https://raw.githubusercontent.com/wuchiawuchi/nineplus-ha-server/main"
+REPO_RAW="https://raw.githubusercontent.com/qttwzy/Ninebot-plus-plus/main/platform"
 
 say() { printf '\n%s\n' "$*"; }
 die() { printf '错误：%s\n' "$*" >&2; exit 1; }

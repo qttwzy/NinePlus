@@ -29,6 +29,7 @@ from snapshot_cache import (
     TTL_TRAVEL_DETAIL,
     TTL_TRAVEL_HISTORICAL,
     TTL_VEHICLES,
+    CacheMetrics,
     CommandAudit,
     RequestCoalescer,
     SnapshotStore,
@@ -340,6 +341,7 @@ class BufferedNinebotClient:
         coalescer: RequestCoalescer,
         commands: CommandAudit,
         enabled: bool = True,
+        metrics: CacheMetrics | None = None,
     ):
         self.inner = inner
         self.account_id = account_id
@@ -347,11 +349,22 @@ class BufferedNinebotClient:
         self.coalescer = coalescer
         self.commands = commands
         self.enabled = enabled and store.enabled
-        self.last_meta: dict[str, Any] = {}
+        self.metrics = metrics or CacheMetrics()
+        self._request_state = threading.local()
+        self._refresh_lock = threading.Lock()
+        self._refreshing: set[str] = set()
 
     @property
     def settings(self) -> Settings:
         return self.inner.settings
+
+    @property
+    def last_meta(self) -> dict[str, Any]:
+        return getattr(self._request_state, "meta", {})
+
+    @last_meta.setter
+    def last_meta(self, meta: dict[str, Any]) -> None:
+        self._request_state.meta = meta
 
     def _meta(self, hit: Any) -> dict[str, Any]:
         meta = {
@@ -371,21 +384,24 @@ class BufferedNinebotClient:
         fetch: Callable[[], Any],
     ) -> tuple[Any, dict[str, Any]]:
         if not self.enabled:
+            self.metrics.increment("direct_reads")
+            self.metrics.increment("upstream_fetches")
             payload = fetch()
             self._meta(None)
             return payload, self.last_meta
         hit = self.store.get(self.account_id, vehicle_sn, data_type)
         if hit is not None and not hit.stale:
+            self.metrics.increment("cache_hits")
             self._meta(hit)
             return hit.payload, self.last_meta
 
         key = f"{self.account_id}|{vehicle_sn}|{data_type}"
-
-        def load() -> Any:
-            return fetch()
+        self.metrics.increment("cache_misses" if hit is None else "expired_reads")
 
         try:
-            payload = self.coalescer.run(key, load)
+            fresh = self.coalescer.run(
+                key, lambda: self._load_snapshot(vehicle_sn, data_type, ttl, fetch),
+            )
         except Exception:
             if hit is not None:
                 # Keep last known good; mark stale so clients can show freshness.
@@ -393,16 +409,22 @@ class BufferedNinebotClient:
                 self.last_meta = dict(self.last_meta, stale=True, buffered=True)
                 return hit.payload, self.last_meta
             raise
-        fresh = self.store.get(self.account_id, vehicle_sn, data_type)
-        if fresh is not None and not fresh.stale and fresh.payload == payload:
-            self._meta(fresh)
-        else:
-            stored = self.store.put(
-                self.account_id, vehicle_sn, data_type, payload, ttl,
-                source_updated_at=_source_updated_at(payload),
-            )
-            self._meta(stored)
-        return payload, self.last_meta
+        return fresh.payload, self._meta(fresh)
+
+    def _load_snapshot(
+        self, vehicle_sn: str, data_type: str, ttl: int, fetch: Callable[[], Any],
+    ) -> Any:
+        # Check again after winning a flight: another caller may have published
+        # the snapshot between the initial read and scheduling this operation.
+        current = self.store.get(self.account_id, vehicle_sn, data_type)
+        if current is not None and not current.stale:
+            return current
+        self.metrics.increment("upstream_fetches")
+        payload = fetch()
+        return self.store.put(
+            self.account_id, vehicle_sn, data_type, payload, ttl,
+            source_updated_at=_source_updated_at(payload),
+        )
 
     def _read_stale_ok(
         self,
@@ -416,27 +438,54 @@ class BufferedNinebotClient:
             return self._read(vehicle_sn, data_type, ttl, fetch)
         hit = self.store.get(self.account_id, vehicle_sn, data_type)
         if hit is not None and not hit.stale:
+            self.metrics.increment("cache_hits")
             self._meta(hit)
             return hit.payload, self.last_meta
         if hit is not None and hit.stale:
+            self.metrics.increment("stale_served")
             self._meta(hit)
-
-            def refresh() -> None:
-                try:
-                    payload = fetch()
-                    self.store.put(
-                        self.account_id, vehicle_sn, data_type, payload, ttl,
-                        source_updated_at=_source_updated_at(payload),
-                    )
-                except Exception as exc:  # noqa: BLE001 - background refresh must not crash
-                    print(f"background refresh failed {data_type}/{vehicle_sn}: {exc}", file=sys.stderr)
-
-            threading.Thread(target=refresh, name=f"swr-{data_type}", daemon=True).start()
+            self._refresh_stale(vehicle_sn, data_type, ttl, fetch)
             return hit.payload, self.last_meta
         return self._read(vehicle_sn, data_type, ttl, fetch)
 
+    def _refresh_stale(
+        self,
+        vehicle_sn: str,
+        data_type: str,
+        ttl: int,
+        fetch: Callable[[], Any],
+    ) -> None:
+        key = f"{self.account_id}|{vehicle_sn}|{data_type}"
+        with self._refresh_lock:
+            if key in self._refreshing:
+                self.metrics.increment("swr_deduplicated")
+                return
+            self._refreshing.add(key)
+            self.metrics.increment("swr_scheduled")
+
+        def refresh() -> None:
+            try:
+                self.coalescer.run(
+                    key, lambda: self._load_snapshot(vehicle_sn, data_type, ttl, fetch),
+                )
+                self.metrics.increment("refresh_successes")
+            except Exception as exc:  # noqa: BLE001 - background refresh must not crash
+                self.metrics.increment("refresh_failures")
+                print(f"background refresh failed {data_type}/{vehicle_sn}: {exc}", file=sys.stderr)
+            finally:
+                with self._refresh_lock:
+                    self._refreshing.discard(key)
+
+        try:
+            threading.Thread(target=refresh, name=f"swr-{data_type}", daemon=True).start()
+        except RuntimeError:
+            with self._refresh_lock:
+                self._refreshing.discard(key)
+            self.metrics.increment("refresh_failures")
+            raise
+
     def vehicles(self) -> list[dict[str, Any]]:
-        payload, _ = self._read("*", "vehicles", TTL_VEHICLES, self.inner.vehicles)
+        payload, _ = self._read_stale_ok("*", "vehicles", TTL_VEHICLES, self.inner.vehicles)
         return payload if isinstance(payload, list) else []
 
     def ensure_vehicle(self, sn: str) -> None:
@@ -446,12 +495,12 @@ class BufferedNinebotClient:
     def dashboard(self, sn: str) -> tuple[dict[str, Any], dict[str, Any]]:
         month = datetime.now().strftime("%Y%m")
         status, status_meta = self._read_stale_ok(sn, "status", TTL_STATUS, lambda: self.inner.status_only(sn))
-        battery, _ = self._read_stale_ok(sn, "battery", TTL_BATTERY, lambda: self.inner.battery_only(sn))
-        travel, _ = self._read_stale_ok(
+        battery, battery_meta = self._read_stale_ok(sn, "battery", TTL_BATTERY, lambda: self.inner.battery_only(sn))
+        travel, travel_meta = self._read_stale_ok(
             sn, f"travel:{month}", TTL_TRAVEL_CURRENT,
             lambda: self.inner.travel(sn, month),
         )
-        vehicles = self.vehicles()
+        vehicles, vehicles_meta = self._read_stale_ok("*", "vehicles", TTL_VEHICLES, self.inner.vehicles)
         vehicle = next(
             (v for v in vehicles if str(v.get("wnumber") or v.get("sn")) == sn),
             {"sn": sn, "wnumber": sn},
@@ -463,11 +512,18 @@ class BufferedNinebotClient:
             "travel": travel,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        components = {
+            "status": status_meta,
+            "battery": battery_meta,
+            "travel": travel_meta,
+            "vehicles": vehicles_meta,
+        }
         return payload, {
             "fetched_at": status_meta.get("fetched_at", iso()),
             "source_updated_at": status_meta.get("source_updated_at"),
-            "stale": bool(status_meta.get("stale")),
-            "buffered": True,
+            "stale": any(bool(meta.get("stale")) for meta in components.values()),
+            "buffered": all(bool(meta.get("buffered")) for meta in components.values()),
+            "components": components,
         }
 
     def status_only(self, sn: str) -> dict[str, Any]:
@@ -533,6 +589,7 @@ class NinePlusAdapter:
         self.snapshot_store = SnapshotStore(settings.snapshot_db_path)
         self.coalescer = RequestCoalescer()
         self.command_audit = CommandAudit(self.snapshot_store)
+        self.cache_metrics = CacheMetrics()
 
     def login(self, account: str, password: str) -> dict[str, Any] | None:
         record = self.account_store.authenticate(account, password) or {}
@@ -559,6 +616,7 @@ class NinePlusAdapter:
                     coalescer=self.coalescer,
                     commands=self.command_audit,
                     enabled=self.settings.buffer_enabled,
+                    metrics=self.cache_metrics,
                 )
                 self._clients[account] = client
             return client
@@ -775,6 +833,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:
                 "backend": backend,
                 "accounts": account_count,
                 "buffer_enabled": self.adapter.settings.buffer_enabled and self.adapter.snapshot_store.enabled,
+                "cache_metrics": self.adapter.cache_metrics.snapshot(),
             })
             return
         if not self._authorized():

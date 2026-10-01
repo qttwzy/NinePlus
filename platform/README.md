@@ -7,7 +7,7 @@
 在已经安装 Docker 的 Linux、NAS 或 macOS 终端执行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/wuchiawuchi/nineplus-ha-server/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/qttwzy/Ninebot-plus-plus/main/platform/install.sh)
 ```
 
 脚本会生成随机 Bearer Token、拉取镜像并启动容器。第一次访问 `http://服务器IP:19009/admin` 时，页面会让你设置后台管理员密码；之后在后台新增 NineBot+ 账号及对应的九号出行账号。默认安装到当前目录的 `nineplus-ha-server`；可用 `NINEPLUS_DIR=/指定目录` 修改位置。
@@ -105,13 +105,13 @@ docker compose logs -f nineplus
 在服务器部署目录执行以下命令，会拉取最新镜像并重建容器，同时保留 `.env` 和 Docker 数据卷中的账号数据：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/wuchiawuchi/nineplus-ha-server/main/update.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/qttwzy/Ninebot-plus-plus/main/platform/update.sh)
 ```
 
 也可以指定部署目录：
 
 ```bash
-NINEPLUS_DIR=/指定目录 bash <(curl -fsSL https://raw.githubusercontent.com/wuchiawuchi/nineplus-ha-server/main/update.sh)
+NINEPLUS_DIR=/指定目录 bash <(curl -fsSL https://raw.githubusercontent.com/qttwzy/Ninebot-plus-plus/main/platform/update.sh)
 ```
 
 脚本不会执行 `docker compose down -v`，因此不会删除已有账号、管理员密码或九号令牌。
@@ -122,7 +122,7 @@ NINEPLUS_DIR=/指定目录 bash <(curl -fsSL https://raw.githubusercontent.com/w
 
 1. 运行 Python 单元测试。
 2. 构建 `linux/amd64` 和 `linux/arm64` 镜像。
-3. 推送到 `ghcr.io/<用户名>/nineplus-ha-server:latest`。
+3. 推送到 `ghcr.io/<用户名>/ninebot-plus-plus-platform:latest`。
 
 首次发布后，到仓库的 **Packages → Package settings** 调整镜像可见性。九号账号密码只放在实际部署服务器的 `.env` 中，不要添加到 GitHub Secrets。
 
