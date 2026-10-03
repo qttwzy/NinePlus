@@ -81,6 +81,7 @@ class AppViewModel(
     private val operationMutex = Mutex()
     private var lastAutoRefreshAt = 0L
     private var refreshJob: Job? = null
+    private val loadedTravelMonths = mutableSetOf<String>()
 
     fun initialize() {
         viewModelScope.launch {
@@ -204,8 +205,9 @@ class AppViewModel(
                     "正在获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 行程",
                 ) {
                     repository.syncTravelMonth(vehicleSn, month)
+                    loadedTravelMonths += travelMonthKey(vehicleSn, month)
                     refreshLocalCaches()
-                    val records = _interfaceRides.value[vehicleSn].orEmpty()
+                    val records = monthRides(vehicleSn, month)
                     if (records.isEmpty()) {
                         status("${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 暂无行程")
                     } else {
@@ -219,6 +221,61 @@ class AppViewModel(
             }
         }
     }
+
+    /**
+     * 行程页懒加载：进入某月时若本地无数据则拉取一次；已尝试过的月份不重复请求。
+     */
+    fun ensureTravelMonth(vehicleSn: String, month: String) {
+        val key = travelMonthKey(vehicleSn, month)
+        if (key in loadedTravelMonths) return
+        if (monthRides(vehicleSn, month).isNotEmpty()) {
+            loadedTravelMonths += key
+            return
+        }
+        viewModelScope.launch {
+            if (key in loadedTravelMonths) return@launch
+            loadedTravelMonths += key
+            runCatching { repository.loadTravelMonth(vehicleSn, month) }
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(errorMessage = it.message)
+                }
+            refreshLocalCaches()
+        }
+    }
+
+    /** 强制拉取某月行程（「获取更早」按钮），并刷新本地列表。 */
+    fun loadTravelMonth(vehicleSn: String, month: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(syncingMonth = month)
+            try {
+                runOperation(
+                    "正在获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 行程",
+                ) {
+                    repository.loadTravelMonth(vehicleSn, month)
+                    loadedTravelMonths += travelMonthKey(vehicleSn, month)
+                    refreshLocalCaches()
+                    val records = monthRides(vehicleSn, month)
+                    if (records.isEmpty()) {
+                        status("${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} 暂无行程")
+                    } else {
+                        status(
+                            "已获取 ${com.example.ninebotplus.util.NineplusDates.displayMonth(month)} ${records.size} 条行程",
+                        )
+                    }
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(syncingMonth = null)
+            }
+        }
+    }
+
+    private fun travelMonthKey(vehicleSn: String, month: String) = "$vehicleSn|$month"
+
+    private fun monthRides(vehicleSn: String, month: String): List<RideRecord> =
+        _interfaceRides.value[vehicleSn].orEmpty().filter { ride ->
+            val date = ride.startedAt ?: ride.endedAt
+            date != null && com.example.ninebotplus.util.NineplusDates.monthString(date) == month
+        }
 
     fun refreshRideDetail(vehicleSn: String, rideId: String, force: Boolean = false) {
         viewModelScope.launch {

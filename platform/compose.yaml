@@ -1,0 +1,29 @@
+services:
+  nineplus:
+    image: ghcr.io/qttwzy/ninebot-plus-plus-platform:latest
+    container_name: nineplus
+    restart: unless-stopped
+    ports:
+      - "19009:19009"
+    environment:
+      NINEBOT_USERNAME: "${NINEBOT_USERNAME:-}"
+      NINEBOT_PASSWORD: "${NINEBOT_PASSWORD:-}"
+      NINEBOT_PASSWORD_B64: "${NINEBOT_PASSWORD_B64:-}"
+      NINEBOT_CONFIG_DIR: "/data/ninebot"
+      NINEPLUS_ACCOUNTS: "/data/ninebot/accounts.json"
+      NINEPLUS_ADMIN_PASSWORD: "${NINEPLUS_ADMIN_PASSWORD:-}"
+      NINEPLUS_ADMIN_PASSWORD_B64: "${NINEPLUS_ADMIN_PASSWORD_B64:-}"
+      NINEPLUS_BEARER_TOKEN: "${NINEPLUS_BEARER_TOKEN:-}"
+      NINEPLUS_ACCOUNT: "${NINEPLUS_ACCOUNT:-homeassistant}"
+      NINEPLUS_PASSWORD: "${NINEPLUS_PASSWORD:-}"
+      NINEPLUS_PASSWORD_B64: "${NINEPLUS_PASSWORD_B64:-}"
+      NINEPLUS_BUFFER_ENABLED: "${NINEPLUS_BUFFER_ENABLED:-1}"
+      NINEPLUS_SNAPSHOT_DB: "/data/ninebot/snapshots.db"
+      FCM_SERVICE_ACCOUNT_PATH: "${FCM_SERVICE_ACCOUNT_PATH:-}"
+      FCM_SERVICE_ACCOUNT_B64: "${FCM_SERVICE_ACCOUNT_B64:-}"
+      FCM_PROJECT_ID: "${FCM_PROJECT_ID:-}"
+    volumes:
+      - ninebot-data:/data/ninebot
+
+volumes:
+  ninebot-data:

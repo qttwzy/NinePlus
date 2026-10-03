@@ -177,8 +177,7 @@ class NinePlusApiClient(
             }
         }
 
-        val monthlyTravels = fetchMonthlyTravels(vehicle.sn, vehicle.authDate, currentMonth, travel)
-        var state = PayloadParser.vehicleState(
+        val state = PayloadParser.vehicleState(
             status = status,
             travel = travel,
             battery = battery,
@@ -187,41 +186,18 @@ class NinePlusApiClient(
                 dashboardObject?.get("updated_at") ?: dashboardObject?.get("updatedAt"),
             ) ?: Date(),
         )
-        val totalMileage = PayloadParser.totalMileageFromMonthlyTravels(monthlyTravels)
-        if (totalMileage != null) {
-            state = state.copy(totalMileage = totalMileage)
-        }
         val dashboardVehicle = dashboardObject?.get("vehicle")?.let { PayloadParser.vehicleInfo(it) } ?: vehicle
         val resolved = PayloadParser.vehicleInfoAddingImage(dashboardVehicle, status, battery)
         return VehicleSnapshot(vehicle = resolved, state = state)
     }
 
-    private suspend fun fetchMonthlyTravels(
-        sn: String,
-        authDate: Date?,
-        currentMonth: String,
-        currentTravel: JsonValue?,
-    ): List<JsonValue>? {
-        val months = NineplusDates.monthStrings(authDate, Date())
-        if (months.isEmpty()) return currentTravel?.let { listOf(it) }
-
-        val payloads = mutableListOf<JsonValue>()
-        for (month in months) {
-            if (month == currentMonth && currentTravel != null) {
-                payloads += currentTravel
-                continue
-            }
-            try {
-                payloads += request(
-                    "GET",
-                    listOf("vehicles", sn, "travel"),
-                    query = mapOf("month" to month),
-                )
-            } catch (_: Exception) {
-                return null
-            }
-        }
-        return payloads
+    /** 单月行程列表；历史月按需拉取，不参与 dashboard 热路径。 */
+    suspend fun fetchTravelMonth(sn: String, month: String): JsonValue {
+        return request(
+            "GET",
+            listOf("vehicles", sn, "travel"),
+            query = mapOf("month" to month),
+        )
     }
 
     suspend fun fetchTravelDetail(sn: String, travelId: String): RideDetail {
@@ -256,6 +232,7 @@ class NinePlusApiClient(
                 put("token", token)
                 put("bundle_id", bundleId)
                 put("environment", environment)
+                put("platform", "android")
             },
         )
     }

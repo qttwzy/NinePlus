@@ -67,11 +67,21 @@ UI 文案使用「上电 / 熄火」。下一跳指令由 `PowerActionDecision` 
 - 本地轨迹：LineString + 起终点 CircleLayer + fit bounds
 - **服务器行程轨迹：❌ 未实现**（Platform 无稳定 normalized track contract）
 
-## 缓存 / JSON
+## 缓存 / JSON / 懒加载
 
 - RideDetail raw 以 JSON **对象** 存储（修复二次 encode）
 - 轨迹点 Room JSONL/checkpoint，非每秒整包重写
 - Room **不再** destructive fallback
+- **dashboard 热路径只拉当前月 travel**；历史月在行程页切换月份时按需 `GET /travel?month=`，结果 upsert 进 Room
+- 总里程取 status `total_mileage`
+- 车辆图片本地文件已存在则跳过下载
+- 地址逆地理 15 分钟内命中缓存
+
+## 续航展示
+
+- 同时展示官方「预估续航」（`estimate_mileage`）与「精准续航」（`precise_estimate_mileage`），两个字段独立解析
+- 紧凑场景（Widget/通知）取精准，其次官方预估
+- 续航数字来自九号云端官方字段
 
 ## 测试矩阵
 

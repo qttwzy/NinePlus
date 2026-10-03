@@ -86,6 +86,10 @@ fun TripsScreen(viewModel: AppViewModel) {
         date != null && NineplusDates.monthString(date) == selectedMonth
     }
 
+    LaunchedEffect(primary.vehicle.sn, selectedMonth) {
+        viewModel.ensureTravelMonth(primary.vehicle.sn, selectedMonth)
+    }
+
     selectedRide?.let { ride ->
         RideDetailDialog(
             viewModel = viewModel,
@@ -116,22 +120,22 @@ fun TripsScreen(viewModel: AppViewModel) {
                     Text("行程概要", fontWeight = FontWeight.SemiBold)
                     Text(primary.vehicle.name, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(10.dp))
-                    Text(
-                        state.localEstimatedMileageText,
-                        fontSize = 36.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text("预计可行驶", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        Metric("官方预估", state.officialEstimatedMileageText)
+                        Metric("精准续航", state.preciseEstimateMileageText)
+                    }
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Metric("今日里程", state.todayMileageText)
                         Metric("平均速度", state.averageSpeedText)
-                        Metric("有效样本", "${state.observedRangeSampleCount} 次")
                         Metric("本月日均", state.dailyAverageMileageText)
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        state.rangeEstimateAccuracyDetailText,
+                        "续航数据来自九号云端官方预估与精准续航",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -179,7 +183,7 @@ fun TripsScreen(viewModel: AppViewModel) {
                     Button(
                         onClick = {
                             val oldest = months.lastOrNull() ?: selectedMonth
-                            viewModel.syncTravelMonth(primary.vehicle.sn, NineplusDates.previousMonth(oldest))
+                            viewModel.loadTravelMonth(primary.vehicle.sn, NineplusDates.previousMonth(oldest))
                         },
                         enabled = ui.syncingMonth == null && !ui.isLoading,
                     ) {
@@ -211,7 +215,7 @@ fun TripsScreen(viewModel: AppViewModel) {
                     Column(Modifier.padding(16.dp)) {
                         Text("${NineplusDates.displayMonth(selectedMonth)} 暂无行程")
                         Text(
-                            "可以切换已有月份，或继续向前获取服务器归档。",
+                            "切换月份会按需加载；也可继续向前获取更早归档。",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

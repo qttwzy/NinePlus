@@ -4,7 +4,7 @@ NineBot+ is a personal iOS and Android client for viewing and managing Ninebot v
 
 Telegram: https://t.me/ninebotultra
 
-The `main` branch is the integrated project baseline for the iOS and Android clients. The NinePlus Platform service remains a separate deployment concern; clients do not connect to Ninebot cloud directly.
+The `main` branch is the integrated project baseline for the iOS and Android clients. NinePlus Platform source lives in `platform/` and deploys independently; clients do not connect to Ninebot cloud directly.
 
 ## Clients
 
@@ -27,9 +27,10 @@ The `main` branch is the integrated project baseline for the iOS and Android cli
 ## Repository layout
 
 ```
-NinePlus/
+Ninebot-plus-plus/
 ├── mini-ninebot/          # iOS app + widgets
 ├── android/               # Android app (Jetpack Compose)
+├── platform/              # NinePlus Platform (ninecli adapter + snapshot cache)
 ├── docs/                  # Architecture notes
 └── README.md
 ```
@@ -64,7 +65,7 @@ Typical endpoints used by clients:
 - `GET /vehicles`, `GET /vehicles/{sn}/dashboard|status|battery|prediction`
 - `GET|POST /vehicles/{sn}/travel*`
 - `POST /vehicles/{sn}/bell|buck|engine/start|engine/stop`
-- `POST /devices/register` (push)
+- `POST /devices/register|unregister` and `POST /push/test` (Android FCM)
 
 Clients send `Authorization: Bearer <app token>` (optional) and `X-NinePlus-Session` (after login).
 

@@ -1305,7 +1305,7 @@ private struct NinebotTripsView: View {
                         let targetMonth = nextFetchMonth
                         selectedMonth = targetMonth
                         Task {
-                            await model.syncTravelMonth(vehicleSN: snapshot.vehicle.sn, month: targetMonth)
+                            await model.loadTravelMonth(vehicleSN: snapshot.vehicle.sn, month: targetMonth)
                         }
                     }
                 )
@@ -1322,17 +1322,28 @@ private struct NinebotTripsView: View {
         .background(Color.teslaPageBackground.ignoresSafeArea())
         .navigationTitle("行程")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: selectedMonth) {
+            await model.ensureTravelMonth(vehicleSN: snapshot.vehicle.sn, month: selectedMonth)
+        }
     }
 
     private var monthOptions: [String] {
-        var months = Set(snapshot.state.rides.compactMap(tripMonthString(for:)))
+        var months = Set(allRides.compactMap(tripMonthString(for:)))
         months.insert(tripMonthString(for: Date()))
         months.insert(selectedMonth)
         return months.sorted(by: >)
     }
 
+    private var allRides: [NinebotRideRecord] {
+        var merged: [String: NinebotRideRecord] = [:]
+        for ride in snapshot.state.rides + model.interfaceRides(for: snapshot.vehicle.sn) {
+            merged[ride.stableIdentityKey] = ride
+        }
+        return Array(merged.values)
+    }
+
     private var filteredRecords: [NinebotRideRecord] {
-        snapshot.state.rides.filter { tripMonthString(for: $0) == selectedMonth }
+        allRides.filter { tripMonthString(for: $0) == selectedMonth }
     }
 
     private var nextFetchMonth: String {
@@ -1730,18 +1741,30 @@ private struct VehicleControlHero: View {
             }
 
             VStack(spacing: 6) {
-                Text(snapshot.state.localEstimatedMileageText)
-                    .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.teslaPrimaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-
-                AlgorithmEstimateTitle(
-                    isUsingDefaultAlgorithm: snapshot.state.isUsingDefaultAlgorithmFallback,
-                    font: .footnote.weight(.medium),
-                    foreground: Color.teslaSecondaryText
-                )
+                HStack(alignment: .firstTextBaseline, spacing: 28) {
+                    VStack(spacing: 2) {
+                        Text(snapshot.state.officialEstimatedMileageText)
+                            .font(.system(size: 32, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.teslaPrimaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text("官方预估")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Color.teslaSecondaryText)
+                    }
+                    VStack(spacing: 2) {
+                        Text(snapshot.state.preciseEstimateMileageText)
+                            .font(.system(size: 32, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.teslaPrimaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text("精准续航")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Color.teslaSecondaryText)
+                    }
+                }
             }
 
             ZStack(alignment: .bottom) {
@@ -1764,7 +1787,7 @@ private struct VehicleControlHero: View {
                     TeslaHeroMetric(title: "电量", value: snapshot.state.batteryText, systemImage: "battery.100")
                     Divider()
                         .frame(height: 34)
-                    TeslaHeroMetric(title: snapshot.state.estimatedMileageSourceTitle, value: snapshot.state.officialEstimatedMileageText, systemImage: "road.lanes")
+                    TeslaHeroMetric(title: "官方预估", value: snapshot.state.officialEstimatedMileageText, systemImage: "road.lanes")
                     Divider()
                         .frame(height: 34)
                     TeslaHeroMetric(title: "均速", value: snapshot.state.averageSpeedText, systemImage: "speedometer")
@@ -2443,42 +2466,46 @@ private struct VehicleRangeEstimatePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("预估可行驶")
-                        .font(.headline)
-                    Text(snapshot.state.localEstimateBasisText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("续航")
+                    .font(.headline)
+                Text("官方预估与精准续航均来自九号云端")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-                Spacer(minLength: 8)
-
-                Text(snapshot.state.localEstimatedMileageText)
-                    .font(.title2.monospacedDigit().weight(.bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+            HStack(spacing: 12) {
+                rangeColumn(title: "官方预估", value: snapshot.state.officialEstimatedMileageText)
+                rangeColumn(title: "精准续航", value: snapshot.state.preciseEstimateMileageText)
             }
 
             RangeEstimateBar(batteryFraction: snapshot.state.batteryFraction)
 
             HStack(spacing: 10) {
-                BasicInfoTile(
-                    title: snapshot.state.predictionModelTitle,
-                    value: snapshot.state.localEstimatedMileageText,
-                    systemImage: "function",
-                    showsAlgorithmFallbackInfo: snapshot.state.isUsingDefaultAlgorithmFallback
-                )
+                BasicInfoTile(title: "电量", value: snapshot.state.batteryText, systemImage: "battery.75")
                 BasicInfoTile(title: "行程均速", value: snapshot.state.averageSpeedText, systemImage: "speedometer")
-                BasicInfoTile(title: snapshot.state.estimatedMileageSourceTitle, value: snapshot.state.officialEstimatedMileageText, systemImage: "road.lanes")
+                BasicInfoTile(title: "预计可行驶", value: snapshot.state.localEstimatedMileageText, systemImage: "road.lanes")
             }
         }
         .padding(16)
         .background(Color.teslaCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: Color.black.opacity(0.02), radius: 10, x: 0, y: 4)
+    }
+
+    private func rangeColumn(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title2.monospacedDigit().weight(.bold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -2759,11 +2786,9 @@ private struct TripTrendRangeModelCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    AlgorithmEstimateTitle(
-                        isUsingDefaultAlgorithm: snapshot.state.isUsingDefaultAlgorithmFallback,
-                        font: .headline,
-                        foreground: Color.teslaPrimaryText
-                    )
+                    Text("官方续航")
+                        .font(.headline)
+                        .foregroundStyle(Color.teslaPrimaryText)
                     Text(snapshot.state.rangeModelInsightText)
                         .font(.caption)
                         .foregroundStyle(Color.teslaSecondaryText)
@@ -2771,10 +2796,15 @@ private struct TripTrendRangeModelCard: View {
 
                 Spacer(minLength: 8)
 
-                Text(snapshot.state.localEstimatedMileageText)
-                    .font(.title3.monospacedDigit().weight(.bold))
-                    .foregroundStyle(Color.teslaPrimaryText)
-                    .lineLimit(1)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("官方预估 \(snapshot.state.officialEstimatedMileageText)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Color.teslaSecondaryText)
+                    Text("精准 \(snapshot.state.preciseEstimateMileageText)")
+                        .font(.title3.monospacedDigit().weight(.bold))
+                        .foregroundStyle(Color.teslaPrimaryText)
+                        .lineLimit(1)
+                }
             }
 
             LazyVGrid(
@@ -3851,15 +3881,9 @@ private struct VehicleDetailPanel: View {
                     DetailRow(title: "循环次数", value: snapshot.state.batteryCycleCountText, systemImage: "arrow.trianglehead.2.clockwise")
                 }
                 DetailRow(title: "充电功率", value: snapshot.state.chargingPowerText, systemImage: "bolt.fill")
-                DetailRow(title: snapshot.state.estimatedMileageSourceTitle, value: snapshot.state.officialEstimatedMileageText, systemImage: "road.lanes")
-                DetailRow(
-                    title: snapshot.state.predictionModelTitle,
-                    value: snapshot.state.localEstimatedMileageText,
-                    systemImage: "function",
-                    showsAlgorithmFallbackInfo: snapshot.state.isUsingDefaultAlgorithmFallback
-                )
-                DetailRow(title: "算法参数", value: snapshot.state.rangeModelSummaryText, systemImage: "target")
-                DetailRow(title: "续航可信", value: snapshot.state.rangePerBatteryPercentText, systemImage: "speedometer")
+                DetailRow(title: "官方预估", value: snapshot.state.officialEstimatedMileageText, systemImage: "road.lanes")
+                DetailRow(title: "精准续航", value: snapshot.state.preciseEstimateMileageText, systemImage: "map")
+                DetailRow(title: "续航效率", value: snapshot.state.rangePerBatteryPercentText, systemImage: "speedometer")
                 DetailRow(title: "充电状态", value: snapshot.state.chargingStateText, systemImage: "bolt.fill")
                 if showsChargingTimeDetails {
                     DetailRow(title: "充电速度", value: snapshot.state.estimatedChargingSpeedText, systemImage: "bolt.car.fill")
