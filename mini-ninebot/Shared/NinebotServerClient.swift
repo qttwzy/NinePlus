@@ -206,6 +206,7 @@ struct NinebotServerClient {
                 "token": token,
                 "bundle_id": bundleID,
                 "environment": environment,
+                "platform": "ios",
             ]
         )
     }

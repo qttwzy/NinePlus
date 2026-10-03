@@ -178,6 +178,27 @@ class AuthSessionTest {
     }
 
     @Test
+    fun pushRegistrationDeclaresAndroidPlatform() = runBlocking {
+        val config = AuthAssembler.effectiveConfiguration(
+            baseUrlString = baseUrl(),
+            bearerToken = "app-token",
+            loginResult = LoginResult(sessionToken = "session-token"),
+        )
+        server.enqueue(json("""{"ok":true,"data":{"accepted":true}}"""))
+
+        NinePlusApiClient(config).registerPushDevice(
+            token = "registration-token",
+            bundleId = "com.example.ninebotplus",
+            environment = "production",
+        )
+
+        val request = server.takeRequest()
+        assertThat(request.path).isEqualTo("/devices/register")
+        assertThat(request.body.readUtf8()).contains("\"platform\":\"android\"")
+        assertThat(request.getHeader("X-NinePlus-Session")).isEqualTo("session-token")
+    }
+
+    @Test
     fun `envelope error throws server message`() = runBlocking {
         server.enqueue(json("""{"ok":false,"error":{"message":"vehicle offline"}}"""))
         try {

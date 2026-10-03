@@ -13,7 +13,9 @@ import secrets
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -70,9 +72,39 @@ class Settings:
     admin_password: str = ""
     buffer_enabled: bool = True
     snapshot_db_path: Path = Path("/data/ninebot/snapshots.db")
+    fcm_service_account_json: str = ""
+    fcm_project_id: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
+        service_account_json = ""
+        service_account_path = _env("FCM_SERVICE_ACCOUNT_PATH")
+        if service_account_path:
+            try:
+                service_account_json = Path(service_account_path).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise RuntimeError("FCM service account file is unavailable") from exc
+        elif _env("FCM_SERVICE_ACCOUNT_B64"):
+            try:
+                service_account_json = base64.b64decode(
+                    _env("FCM_SERVICE_ACCOUNT_B64"), validate=True,
+                ).decode("utf-8")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise RuntimeError("FCM_SERVICE_ACCOUNT_B64 is invalid") from exc
+
+        project_id = _env("FCM_PROJECT_ID")
+        if service_account_json:
+            try:
+                service_account = json.loads(service_account_json)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("FCM service account JSON is invalid") from exc
+            if not isinstance(service_account, dict) or service_account.get("type") != "service_account":
+                raise RuntimeError("FCM service account JSON must be a service account key")
+            if not service_account.get("client_email") or not service_account.get("private_key"):
+                raise RuntimeError("FCM service account JSON is missing required fields")
+            project_id = project_id or str(service_account.get("project_id", ""))
+            if not project_id:
+                raise RuntimeError("FCM_PROJECT_ID is required")
         return cls(
             bearer_token=_env("NINEPLUS_BEARER_TOKEN"),
             account=_env("NINEPLUS_ACCOUNT"),
@@ -84,6 +116,8 @@ class Settings:
             admin_password=_secret_env("NINEPLUS_ADMIN_PASSWORD_B64", "NINEPLUS_ADMIN_PASSWORD") or _secret_env("NINEPLUS_PASSWORD_B64", "NINEPLUS_PASSWORD"),
             buffer_enabled=_env_bool("NINEPLUS_BUFFER_ENABLED", True),
             snapshot_db_path=Path(_env("NINEPLUS_SNAPSHOT_DB", "/data/ninebot/snapshots.db")),
+            fcm_service_account_json=service_account_json,
+            fcm_project_id=project_id,
         )
 
 
@@ -324,6 +358,238 @@ class DirectNinebotClient:
         if command is None:
             raise NotImplementedError(action)
         return self.run(*command)
+
+
+class PushDeviceStore:
+    """Persist per-account APNs/FCM registrations in the protected data volume."""
+
+    def __init__(self, settings: Settings):
+        self.path = settings.ninebot_config_dir / "push_devices.json"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._devices: dict[str, dict[str, Any]] = self._load()
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        if not self.path.exists():
+            return {}
+        with self.path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        values = payload.get("devices", payload) if isinstance(payload, dict) else {}
+        if not isinstance(values, dict):
+            raise RuntimeError("push_devices.json format is invalid")
+        return {str(key): value for key, value in values.items() if isinstance(value, dict)}
+
+    def _save(self) -> None:
+        temporary = self.path.with_suffix(".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "devices": self._devices}, handle, ensure_ascii=False, indent=2)
+        os.chmod(temporary, 0o600)
+        temporary.replace(self.path)
+
+    @staticmethod
+    def key(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+
+    @staticmethod
+    def infer_platform(token: str, bundle_id: str = "") -> str:
+        bundle = bundle_id.casefold()
+        if "android" in bundle or bundle.endswith(".android"):
+            return "android"
+        if "ios" in bundle or bundle.endswith(".ios"):
+            return "ios"
+        # Legacy clients omit platform; FCM tokens contain a colon or exceed
+        # the fixed-size hexadecimal APNs token format.
+        if ":" in token or len(token) > 120:
+            return "android"
+        return "ios"
+
+    def register(
+        self,
+        token: str,
+        account: str,
+        bundle_id: str = "",
+        environment: str = "",
+        platform: str = "",
+    ) -> dict[str, Any]:
+        token = token.strip()
+        if not token:
+            raise ValueError("缺少推送 Token")
+        resolved_platform = platform.strip().lower() or self.infer_platform(token, bundle_id)
+        if resolved_platform not in {"android", "ios"}:
+            raise ValueError("platform must be android or ios")
+        device_id = self.key(token)
+        with self._lock:
+            self._devices[device_id] = {
+                "token": token,
+                "account": account,
+                "bundle_id": bundle_id,
+                "environment": environment or "production",
+                "platform": resolved_platform,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._save()
+        return {"device_id": device_id, "platform": resolved_platform}
+
+    def devices_for(self, account: str, platform: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                dict(device)
+                for device in self._devices.values()
+                if device.get("account") == account and
+                (platform is None or device.get("platform") == platform)
+            ]
+
+    def all_devices(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(device) for device in self._devices.values()]
+
+    def remove(self, token: str, account: str) -> bool:
+        device_id = self.key(token.strip())
+        with self._lock:
+            device = self._devices.get(device_id)
+            if device is None or device.get("account") != account:
+                return False
+            del self._devices[device_id]
+            self._save()
+            return True
+
+
+class _UrllibAuthResponse:
+    def __init__(self, status: int, headers: dict[str, str], data: bytes):
+        self.status = status
+        self.headers = headers
+        self.data = data
+
+
+class _UrllibAuthRequest:
+    """google-auth transport using stdlib urllib and the configured proxy."""
+
+    def __call__(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+        **_kwargs: Any,
+    ) -> _UrllibAuthResponse:
+        request = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+        try:
+            with urllib.request.urlopen(request, timeout=timeout or 30) as response:
+                return _UrllibAuthResponse(response.status, dict(response.headers), response.read())
+        except urllib.error.HTTPError as exc:
+            return _UrllibAuthResponse(exc.code, dict(exc.headers or {}), exc.read())
+
+
+class FcmPusher:
+    """FCM HTTP v1 sender using a locally configured Firebase service account."""
+
+    SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+    ENDPOINT = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+
+    def __init__(
+        self,
+        settings: Settings,
+        credentials_factory: Callable[..., Any] | None = None,
+        auth_request_factory: Callable[[], Any] | None = None,
+        urlopen: Callable[..., Any] | None = None,
+    ):
+        self.settings = settings
+        self._credentials_factory = credentials_factory
+        self._auth_request_factory = auth_request_factory or _UrllibAuthRequest
+        self._urlopen = urlopen
+        self._credentials: Any = None
+        self._credentials_lock = threading.Lock()
+
+    def configured(self) -> bool:
+        return bool(self.settings.fcm_service_account_json and self.settings.fcm_project_id)
+
+    def mode(self) -> str:
+        return "v1" if self.configured() else "none"
+
+    def _load_credentials(self) -> Any:
+        factory = self._credentials_factory
+        if factory is None:
+            from google.oauth2 import service_account
+            factory = service_account.Credentials.from_service_account_info
+        return factory(
+            json.loads(self.settings.fcm_service_account_json),
+            scopes=[self.SCOPE],
+        )
+
+    def _access_token(self) -> str:
+        with self._credentials_lock:
+            if self._credentials is None:
+                self._credentials = self._load_credentials()
+            if not self._credentials.valid:
+                self._credentials.refresh(self._auth_request_factory()())
+            token = self._credentials.token
+            if not token:
+                raise RuntimeError("FCM OAuth token was not issued")
+            return str(token)
+
+    @staticmethod
+    def _provider_error(status: int, payload: bytes) -> str:
+        try:
+            parsed = json.loads(payload)
+            error = parsed.get("error", {}) if isinstance(parsed, dict) else {}
+            code = error.get("status") or error.get("code")
+            if code:
+                return str(code)[:80]
+        except (ValueError, AttributeError):
+            pass
+        return f"HTTP_{status}"
+
+    def send(
+        self,
+        token: str,
+        title: str,
+        body: str,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not self.configured():
+            return {"sent": False, "reason": "FCM is not configured"}
+        if not token.strip():
+            return {"sent": False, "reason": "empty registration token"}
+        message: dict[str, Any] = {
+            "token": token,
+            "notification": {"title": title, "body": body},
+            "data": {str(key): str(value) for key, value in (data or {}).items()},
+            "android": {
+                "priority": "high",
+                "notification": {"channel_id": "push", "sound": "default"},
+            },
+        }
+        try:
+            request = urllib.request.Request(
+                self.ENDPOINT.format(project_id=urllib.parse.quote(self.settings.fcm_project_id, safe="")),
+                data=json.dumps({"message": message}).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self._access_token()}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                method="POST",
+            )
+            opener = self._urlopen or urllib.request.urlopen
+            with opener(request, timeout=15) as response:
+                result = json.loads(response.read() or b"{}")
+                message_name = result.get("name") if isinstance(result, dict) else None
+                if response.status != 200 or not message_name:
+                    return {"sent": False, "status": response.status, "reason": "invalid FCM success response", "mode": "v1"}
+                return {"sent": True, "status": response.status, "message_id": str(message_name), "mode": "v1"}
+        except urllib.error.HTTPError as exc:
+            response_body = exc.read()
+            exc.close()
+            return {
+                "sent": False,
+                "status": exc.code,
+                "reason": self._provider_error(exc.code, response_body),
+                "mode": "v1",
+            }
+        except Exception as exc:
+            # Exception text can contain request or credential details. Report
+            # only the class; diagnostic secrets stay out of API responses.
+            return {"sent": False, "reason": type(exc).__name__, "mode": "v1"}
 
 
 class BufferedNinebotClient:
@@ -582,6 +848,8 @@ class NinePlusAdapter:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.account_store = AccountStore(settings)
+        self.push_devices = PushDeviceStore(settings)
+        self.fcm = FcmPusher(settings)
         self._sessions: dict[str, tuple[str, dict[str, Any]]] = {}
         self._clients: dict[str, BufferedNinebotClient] = {}
         self._session_lock = threading.RLock()
@@ -625,6 +893,43 @@ class NinePlusAdapter:
         with self._session_lock:
             session = self._sessions.get(token)
             return session[0] if session else None
+
+    def register_push_device(
+        self,
+        session_token: str,
+        token: str,
+        bundle_id: str = "",
+        environment: str = "",
+        platform: str = "",
+    ) -> dict[str, Any]:
+        account = self.session_account(session_token)
+        if not account:
+            raise RuntimeError("登录会话无效，请重新登录")
+        registration = self.push_devices.register(token, account, bundle_id, environment, platform)
+        return {"accepted": True, "fcm_configured": self.fcm.configured(), **registration}
+
+    def unregister_push_device(self, session_token: str, token: str) -> dict[str, Any]:
+        account = self.session_account(session_token)
+        if not account:
+            raise RuntimeError("登录会话无效，请重新登录")
+        return {"removed": self.push_devices.remove(token, account)}
+
+    def send_push_to_session(
+        self,
+        session_token: str,
+        title: str,
+        body: str,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        account = self.session_account(session_token)
+        if not account:
+            raise RuntimeError("登录会话无效，请重新登录")
+        devices = self.push_devices.devices_for(account, platform="android")
+        results = []
+        for device in devices:
+            result = self.fcm.send(device["token"], title, body, data)
+            results.append({"device_id": self.push_devices.key(device["token"]), **result})
+        return {"sent": sum(bool(result.get("sent")) for result in results), "total": len(results), "results": results}
 
     def new_admin_session(self) -> str:
         token = secrets.token_urlsafe(32)
@@ -834,6 +1139,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:
                 "accounts": account_count,
                 "buffer_enabled": self.adapter.settings.buffer_enabled and self.adapter.snapshot_store.enabled,
                 "cache_metrics": self.adapter.cache_metrics.snapshot(),
+                "push_devices": len(self.adapter.push_devices.all_devices()),
+                "fcm_configured": self.adapter.fcm.configured(),
+                "fcm_mode": self.adapter.fcm.mode(),
             })
             return
         if not self._authorized():
@@ -896,7 +1204,49 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:
                 result = direct_client.action(account_key, sn, action, str(idem) if idem else None)
                 self._reply(HTTPStatus.OK, result)
                 return
-        if method == "POST" and tuple(parts) in {("devices", "register"), ("live-activities", "register")}:
+        if method == "POST" and parts == ["devices", "register"]:
+            try:
+                registration = self.adapter.register_push_device(
+                    session_token=self.headers.get("X-NinePlus-Session", ""),
+                    token=str(body.get("token", "")),
+                    bundle_id=str(body.get("bundle_id", "")),
+                    environment=str(body.get("environment", "")),
+                    platform=str(body.get("platform", "")),
+                )
+            except ValueError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, error=str(exc))
+                return
+            except RuntimeError as exc:
+                self._reply(HTTPStatus.UNAUTHORIZED, error=str(exc))
+                return
+            self._reply(HTTPStatus.OK, registration)
+            return
+        if method == "POST" and parts == ["devices", "unregister"]:
+            try:
+                result = self.adapter.unregister_push_device(
+                    self.headers.get("X-NinePlus-Session", ""),
+                    str(body.get("token", "")),
+                )
+            except RuntimeError as exc:
+                self._reply(HTTPStatus.UNAUTHORIZED, error=str(exc))
+                return
+            self._reply(HTTPStatus.OK, result)
+            return
+        if method == "POST" and parts == ["push", "test"]:
+            try:
+                data = body.get("data") if isinstance(body.get("data"), dict) else {}
+                result = self.adapter.send_push_to_session(
+                    self.headers.get("X-NinePlus-Session", ""),
+                    str(body.get("title") or "NinePlus 测试推送"),
+                    str(body.get("body") or "远程推送链路测试"),
+                    data,
+                )
+            except RuntimeError as exc:
+                self._reply(HTTPStatus.UNAUTHORIZED, error=str(exc))
+                return
+            self._reply(HTTPStatus.OK, result)
+            return
+        if method == "POST" and parts == ["live-activities", "register"]:
             self._reply(HTTPStatus.OK, {"accepted": False, "reason": "APNs is not configured"})
             return
         self._reply(HTTPStatus.NOT_FOUND, error="接口不存在")

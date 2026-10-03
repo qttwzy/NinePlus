@@ -24,6 +24,10 @@ platform/**/snapshots.db-*
 platform/**/tokens.json
 platform/**/accounts.json
 platform/**/push_devices.json
+platform/**/fcm-service-account*.json
+platform/**/service-account*.json
+platform/**/fcm-service-account*
+platform/**/*service-account*
 
 # Signing material
 *.mobileprovision

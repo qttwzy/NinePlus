@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 
-RUN pip install --no-cache-dir ninecli==0.1.7
+RUN pip install --no-cache-dir ninecli==0.1.7 google-auth==2.38.0
 RUN addgroup -S app && adduser -S -G app app
 RUN mkdir -p /data/ninebot && chown -R app:app /data/ninebot
 WORKDIR /app

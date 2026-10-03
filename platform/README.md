@@ -61,6 +61,21 @@ NINEPLUS_SNAPSHOT_DB=/data/ninebot/snapshots.db
 
 **回滚**：设 `NINEPLUS_BUFFER_ENABLED=0` 并重启容器即可回到直连读路径；快照库可保留，不影响回滚。
 
+## Android 远程推送（FCM）
+
+`POST /devices/register` 按已登录的 NineBot+ 账号保存设备 Token 到 `/data/ninebot/push_devices.json`，文件权限为 `0600`。注册请求可带 `platform: android|ios`；新客户端明确发送平台，旧客户端按 Token 格式兼容识别。`POST /devices/unregister` 只允许当前账号注销自己的 Token。
+
+启用 Android 下发前，在 Firebase 项目启用 Firebase Cloud Messaging API，并给发送服务账号授予 **Firebase Cloud Messaging API Admin** 角色。官方流程见 [FCM HTTP v1 授权说明](https://firebase.google.com/docs/cloud-messaging/send/v1-api)。随后在部署服务器本地 `.env` 配置服务账号，不能提交到仓库：
+
+```dotenv
+FCM_SERVICE_ACCOUNT_B64=<服务账号 JSON 文件的 Base64>
+FCM_PROJECT_ID=<Firebase 项目 ID，可从 JSON 自动读取>
+```
+
+也可通过 `FCM_SERVICE_ACCOUNT_PATH` 指向挂载在容器内、对应用用户可读的 JSON 文件。服务使用 FCM HTTP v1；`GET /healthz` 仅报告 `fcm_configured`、`fcm_mode` 和已注册设备数量，不返回凭证或设备 Token。
+
+登录后可调用 `POST /push/test` 向该账号已注册的 Android 设备发送测试通知。APNs/iOS 下发尚未实现；`POST /live-activities/register` 保持兼容占位响应。
+
 ## 手工配置
 
 ```bash
@@ -142,6 +157,7 @@ NINEPLUS_DIR=/指定目录 bash <(curl -fsSL https://raw.githubusercontent.com/q
 - 车辆列表、仪表盘、状态、电池
 - 直连九号云端读取状态、电池和行程
 - 直连控制：响铃、开座桶、启动、熄火
-- 推送注册兼容响应（本适配器不发送 APNs）
+- 按账号注册/注销设备 Token，Android FCM HTTP v1 推送与测试发送
+- Live Activity/APNs 注册兼容占位响应
 
-预测模型和 APNs 需要额外数据库/推送基础设施，目前不包含。
+预测模型和 APNs 需要额外服务能力，目前不包含。

@@ -5,3 +5,9 @@ tests
 *.pyc
 .env
 config.json
+**/*service-account*
+**/firebase-adminsdk*
+**/accounts.json
+**/push_devices.json
+**/tokens.json
+**/snapshots.db*

@@ -232,6 +232,7 @@ class NinePlusApiClient(
                 put("token", token)
                 put("bundle_id", bundleId)
                 put("environment", environment)
+                put("platform", "android")
             },
         )
     }

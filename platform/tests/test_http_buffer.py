@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from datetime import datetime
 from http.server import ThreadingHTTPServer
@@ -30,8 +31,21 @@ class BufferedHttpTests(unittest.TestCase):
         self.adapter.cache_metrics = self.client.metrics
         self.adapter.account_store = MagicMock()
         self.adapter.account_store.list_accounts.return_value = []
+        self.adapter.push_devices = MagicMock()
+        self.adapter.push_devices.all_devices.return_value = []
+        self.adapter.fcm = MagicMock()
+        self.adapter.fcm.configured.return_value = False
+        self.adapter.fcm.mode.return_value = "none"
         self.adapter.client_for_session.return_value = self.client
         self.adapter.session_account.return_value = "test-account"
+        self.adapter.register_push_device.return_value = {
+            "accepted": True,
+            "fcm_configured": False,
+            "device_id": "hashed-device-id",
+            "platform": "android",
+        }
+        self.adapter.unregister_push_device.return_value = {"removed": True}
+        self.adapter.send_push_to_session.return_value = {"sent": 0, "total": 0, "results": []}
 
         class TestHandler(Handler):
             def log_message(self, *_args):
@@ -118,3 +132,82 @@ class BufferedHttpTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "审计不可用"):
             self.client.action("test-account", "SN1", "engine_start", "one-operation")
         self.inner.action.assert_not_called()
+
+    def test_push_device_routes_require_session_and_keep_tokens_out_of_response(self):
+        body = json.dumps({
+            "token": "registration-token-secret",
+            "bundle_id": "com.example.ninebotplus",
+            "environment": "production",
+            "platform": "android",
+        }).encode()
+        request = urllib.request.Request(
+            self.base + "/devices/register",
+            data=body,
+            headers={
+                "Authorization": "Bearer gateway-token",
+                "X-NinePlus-Session": "session-a",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+        self.assertTrue(payload["data"]["accepted"])
+        self.assertNotIn("registration-token-secret", json.dumps(payload))
+        self.adapter.register_push_device.assert_called_once_with(
+            session_token="session-a",
+            token="registration-token-secret",
+            bundle_id="com.example.ninebotplus",
+            environment="production",
+            platform="android",
+        )
+
+        unauthorized = urllib.request.Request(
+            self.base + "/devices/register",
+            data=body,
+            headers={"Authorization": "Bearer gateway-token", "Content-Type": "application/json"},
+            method="POST",
+        )
+        self.adapter.client_for_session.return_value = None
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(unauthorized, timeout=2)
+        self.assertEqual(error.exception.code, 401)
+        error.exception.close()
+
+    def test_push_test_route_uses_authenticated_session_without_exposing_device_tokens(self):
+        self.adapter.send_push_to_session.return_value = {
+            "sent": 1,
+            "total": 1,
+            "results": [{"device_id": "hashed-device-id", "sent": True, "status": 200}],
+        }
+        request = urllib.request.Request(
+            self.base + "/push/test",
+            data=json.dumps({"title": "Test", "body": "Hello", "data": {"source": "test"}}).encode(),
+            headers={
+                "Authorization": "Bearer gateway-token",
+                "X-NinePlus-Session": "session-a",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+        self.assertEqual(payload["data"]["sent"], 1)
+        self.assertNotIn("registration-token-secret", json.dumps(payload))
+        self.adapter.send_push_to_session.assert_called_once_with(
+            "session-a", "Test", "Hello", {"source": "test"},
+        )
+
+    def test_push_test_rejects_a_missing_session(self):
+        self.adapter.client_for_session.return_value = None
+        request = urllib.request.Request(
+            self.base + "/push/test",
+            data=b"{}",
+            headers={"Authorization": "Bearer gateway-token", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=2)
+        self.assertEqual(error.exception.code, 401)
+        error.exception.close()
+        self.adapter.send_push_to_session.assert_not_called()

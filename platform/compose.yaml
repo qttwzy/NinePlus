@@ -19,6 +19,9 @@ services:
       NINEPLUS_PASSWORD_B64: "${NINEPLUS_PASSWORD_B64:-}"
       NINEPLUS_BUFFER_ENABLED: "${NINEPLUS_BUFFER_ENABLED:-1}"
       NINEPLUS_SNAPSHOT_DB: "/data/ninebot/snapshots.db"
+      FCM_SERVICE_ACCOUNT_PATH: "${FCM_SERVICE_ACCOUNT_PATH:-}"
+      FCM_SERVICE_ACCOUNT_B64: "${FCM_SERVICE_ACCOUNT_B64:-}"
+      FCM_PROJECT_ID: "${FCM_PROJECT_ID:-}"
     volumes:
       - ninebot-data:/data/ninebot
 

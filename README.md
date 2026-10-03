@@ -65,7 +65,7 @@ Typical endpoints used by clients:
 - `GET /vehicles`, `GET /vehicles/{sn}/dashboard|status|battery|prediction`
 - `GET|POST /vehicles/{sn}/travel*`
 - `POST /vehicles/{sn}/bell|buck|engine/start|engine/stop`
-- `POST /devices/register` (push)
+- `POST /devices/register|unregister` and `POST /push/test` (Android FCM)
 
 Clients send `Authorization: Bearer <app token>` (optional) and `X-NinePlus-Session` (after login).
 
