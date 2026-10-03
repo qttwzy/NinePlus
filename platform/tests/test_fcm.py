@@ -39,6 +39,15 @@ class PushDeviceStoreTests(unittest.TestCase):
         mode = store.path.stat().st_mode & 0o777
         self.assertEqual(mode, 0o600)
 
+    def test_failed_atomic_replace_cleans_up_temporary_file(self):
+        store = PushDeviceStore(self.settings)
+        with patch("server.os.replace", side_effect=OSError("replace failed")):
+            with self.assertRaises(OSError):
+                store.register("device-token", "alice", platform="android")
+
+        temporary_files = list(store.path.parent.glob(f".{store.path.name}.*.tmp"))
+        self.assertEqual(temporary_files, [])
+
 
 class FcmPusherTests(unittest.TestCase):
     SERVICE_ACCOUNT = {

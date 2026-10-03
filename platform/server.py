@@ -12,6 +12,7 @@ import os
 import secrets
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.parse
@@ -380,11 +381,24 @@ class PushDeviceStore:
         return {str(key): value for key, value in values.items() if isinstance(value, dict)}
 
     def _save(self) -> None:
-        temporary = self.path.with_suffix(".tmp")
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump({"version": 1, "devices": self._devices}, handle, ensure_ascii=False, indent=2)
-        os.chmod(temporary, 0o600)
-        temporary.replace(self.path)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary_path = Path(handle.name)
+                json.dump({"version": 1, "devices": self._devices}, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, self.path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     @staticmethod
     def key(token: str) -> str:
