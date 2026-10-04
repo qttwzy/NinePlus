@@ -23,7 +23,7 @@ services:
       FCM_SERVICE_ACCOUNT_B64: "${FCM_SERVICE_ACCOUNT_B64:-}"
       FCM_PROJECT_ID: "${FCM_PROJECT_ID:-}"
     volumes:
-      - ninebot-data:/data/ninebot
+      - nineplus-data:/data/ninebot
 
 volumes:
-  ninebot-data:
+  nineplus-data:
